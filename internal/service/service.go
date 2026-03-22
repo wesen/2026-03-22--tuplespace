@@ -1,0 +1,196 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/manuel/wesen/tuplespace/internal/match"
+	"github.com/manuel/wesen/tuplespace/internal/notify"
+	"github.com/manuel/wesen/tuplespace/internal/store"
+	"github.com/manuel/wesen/tuplespace/internal/types"
+	"github.com/manuel/wesen/tuplespace/internal/validation"
+)
+
+type TupleSpace interface {
+	Out(ctx context.Context, space string, tuple types.Tuple) error
+	Rd(ctx context.Context, space string, template types.Template, wait time.Duration) (types.Tuple, types.Bindings, error)
+	In(ctx context.Context, space string, template types.Template, wait time.Duration) (types.Tuple, types.Bindings, error)
+	Rdp(ctx context.Context, space string, template types.Template) (types.Tuple, types.Bindings, bool, error)
+	Inp(ctx context.Context, space string, template types.Template) (types.Tuple, types.Bindings, bool, error)
+}
+
+type Service struct {
+	db             *pgxpool.Pool
+	store          *store.TupleStore
+	notifier       *notify.Notifier
+	candidateLimit int
+}
+
+func New(db *pgxpool.Pool, tupleStore *store.TupleStore, notifier *notify.Notifier, candidateLimit int) *Service {
+	if candidateLimit <= 0 {
+		candidateLimit = 64
+	}
+	return &Service{
+		db:             db,
+		store:          tupleStore,
+		notifier:       notifier,
+		candidateLimit: candidateLimit,
+	}
+}
+
+func (s *Service) Out(ctx context.Context, space string, tuple types.Tuple) error {
+	if err := validation.ValidateSpace(space); err != nil {
+		return err
+	}
+	normalizedTuple, err := validation.ValidateTuple(tuple)
+	if err != nil {
+		return err
+	}
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin out transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := s.store.InsertTuple(ctx, tx, space, normalizedTuple); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_notify($1, '')`, notify.ChannelName(space)); err != nil {
+		return fmt.Errorf("notify listeners: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Service) Rd(ctx context.Context, space string, template types.Template, wait time.Duration) (types.Tuple, types.Bindings, error) {
+	return s.read(ctx, space, template, wait, false)
+}
+
+func (s *Service) In(ctx context.Context, space string, template types.Template, wait time.Duration) (types.Tuple, types.Bindings, error) {
+	return s.read(ctx, space, template, wait, true)
+}
+
+func (s *Service) Rdp(ctx context.Context, space string, template types.Template) (types.Tuple, types.Bindings, bool, error) {
+	tuple, bindings, err := s.Rd(ctx, space, template, 0)
+	if err == ErrNotFound {
+		return types.Tuple{}, nil, false, nil
+	}
+	return tuple, bindings, err == nil, err
+}
+
+func (s *Service) Inp(ctx context.Context, space string, template types.Template) (types.Tuple, types.Bindings, bool, error) {
+	tuple, bindings, err := s.In(ctx, space, template, 0)
+	if err == ErrNotFound {
+		return types.Tuple{}, nil, false, nil
+	}
+	return tuple, bindings, err == nil, err
+}
+
+func (s *Service) read(ctx context.Context, space string, template types.Template, wait time.Duration, destructive bool) (types.Tuple, types.Bindings, error) {
+	if err := validation.ValidateSpace(space); err != nil {
+		return types.Tuple{}, nil, err
+	}
+	normalizedTemplate, err := validation.ValidateTemplate(template)
+	if err != nil {
+		return types.Tuple{}, nil, err
+	}
+	if wait < 0 {
+		return types.Tuple{}, nil, fmt.Errorf("wait duration must be >= 0")
+	}
+
+	opCtx, cancel := withOptionalTimeout(ctx, wait)
+	defer cancel()
+
+	var sub notify.Subscription
+	if wait > 0 {
+		sub, err = s.notifier.Subscribe(space)
+		if err != nil {
+			return types.Tuple{}, nil, err
+		}
+		defer sub.Close()
+	}
+
+	for {
+		if destructive {
+			tuple, bindings, found, err := s.consumeOnce(opCtx, space, normalizedTemplate)
+			if err != nil {
+				return types.Tuple{}, nil, err
+			}
+			if found {
+				return tuple, bindings, nil
+			}
+		} else {
+			tuple, bindings, found, err := s.readOnce(opCtx, space, normalizedTemplate)
+			if err != nil {
+				return types.Tuple{}, nil, err
+			}
+			if found {
+				return tuple, bindings, nil
+			}
+		}
+
+		if wait == 0 {
+			return types.Tuple{}, nil, ErrNotFound
+		}
+
+		select {
+		case <-opCtx.Done():
+			if opCtx.Err() == context.DeadlineExceeded {
+				return types.Tuple{}, nil, ErrTimeout
+			}
+			return types.Tuple{}, nil, opCtx.Err()
+		case <-sub.C():
+		}
+	}
+}
+
+func (s *Service) readOnce(ctx context.Context, space string, template types.Template) (types.Tuple, types.Bindings, bool, error) {
+	candidates, err := s.store.FindCandidates(ctx, s.db, space, template, s.candidateLimit)
+	if err != nil {
+		return types.Tuple{}, nil, false, err
+	}
+	for _, candidate := range candidates {
+		bindings, ok := match.Match(template, candidate.Tuple)
+		if ok {
+			return candidate.Tuple, bindings, true, nil
+		}
+	}
+	return types.Tuple{}, nil, false, nil
+}
+
+func (s *Service) consumeOnce(ctx context.Context, space string, template types.Template) (types.Tuple, types.Bindings, bool, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return types.Tuple{}, nil, false, fmt.Errorf("begin consume transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	candidates, err := s.store.LockCandidatesForConsume(ctx, tx, space, template, s.candidateLimit)
+	if err != nil {
+		return types.Tuple{}, nil, false, err
+	}
+	for _, candidate := range candidates {
+		bindings, ok := match.Match(template, candidate.Tuple)
+		if !ok {
+			continue
+		}
+		if err := s.store.DeleteTuple(ctx, tx, candidate.ID); err != nil {
+			return types.Tuple{}, nil, false, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return types.Tuple{}, nil, false, fmt.Errorf("commit consume transaction: %w", err)
+		}
+		return candidate.Tuple, bindings, true, nil
+	}
+	return types.Tuple{}, nil, false, nil
+}
+
+func withOptionalTimeout(ctx context.Context, wait time.Duration) (context.Context, context.CancelFunc) {
+	if wait <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, wait)
+}
