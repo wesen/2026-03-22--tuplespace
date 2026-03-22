@@ -82,3 +82,14 @@ Added a full compose stack for Postgres plus tuplespaced and validated the tutor
 
 - /home/manuel/code/wesen/2026-03-22--tuplespace/Dockerfile — Builds tuplespaced and tuplespacectl inside a container image while rewriting the local Glazed replace target
 - /home/manuel/code/wesen/2026-03-22--tuplespace/docker-compose.yml — Runs both postgres and tuplespaced together with the server published on port 18081
+
+
+## 2026-03-22
+
+Enabled env defaults in tuplespacectl and allowed tuple out to accept multiple positional tuple specs in one invocation
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go — Shared Glazed builder now enables env parsing and tuple input selection now supports positional multi-out
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/out.go — tuple out now accepts positional tuple-spec arguments and emits one row per inserted tuple
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go — Added built-binary tests for env defaults and multi-tuple positional out

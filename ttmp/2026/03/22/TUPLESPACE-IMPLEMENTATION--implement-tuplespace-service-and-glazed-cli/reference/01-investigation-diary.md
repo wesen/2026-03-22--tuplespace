@@ -18,7 +18,7 @@ RelatedFiles:
       Note: Primary deliverable produced during the ticket work
 ExternalSources: []
 Summary: Chronological diary of the investigation, ticket setup, design writing, validation, and delivery work for the TupleSpace implementation ticket.
-LastUpdated: 2026-03-22T16:46:13-04:00
+LastUpdated: 2026-03-22T16:57:18-04:00
 WhatFor: Capture what was done, why it was done, what evidence shaped the design, and how the deliverables were validated and delivered.
 WhenToUse: Use when reviewing the ticket work, continuing the implementation effort, or reconstructing the design decisions and delivery steps.
 ---
@@ -935,6 +935,127 @@ ok, run both in docker compose, and then give me a set of commands for me to lea
   - `docker exec tuplespace-server tuplespacectl tuple rd --server-url http://127.0.0.1:8080 --space jobs --template-spec 'job,?id:int,?ready:bool' --output json`
   - `docker exec tuplespace-server tuplespacectl tuple in --server-url http://127.0.0.1:8080 --space jobs --template-spec 'job,?id:int,?ready:bool' --output json`
   - `docker exec tuplespace-server tuplespacectl tuple rd --server-url http://127.0.0.1:8080 --space jobs --template-spec 'job,?id:int,?ready:bool' --output json`
+
+## Step 9: Enable Env Defaults In The CLI And Allow Multi-Tuple Positional Out
+
+The next CLI refinement was about operator speed. The first part was enabling Glazed’s built-in environment-variable parsing for `tuplespacectl` so `server-url` and `space` can be set once in the shell. The second part was making `tuple out` accept multiple positional tuple specs, with one tuple written per argument, so bulk inserts do not require repeated command invocations.
+
+These two changes fit together because they both make the CLI less repetitive without changing the server API or tuple semantics. The transport stays exactly the same; the CLI just gets more ergonomic.
+
+### Prompt Context
+
+**User prompt (verbatim):**
+
+```text
+do we use env variables for tuplespacectl? I want to set server_url and default space
+```
+
+**User prompt (verbatim):**
+
+```text
+Allow the multiple arguments to out with a tuple per argument
+```
+
+**Assistant interpretation:** Enable environment-based defaults for common CLI flags and extend `tuple out` so positional tuple specs can be sent in one invocation.
+
+**Inferred user intent:** Reduce friction for repeated interactive use of the TupleSpace CLI.
+
+### What I did
+
+- Added a shared Glazed command builder in `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go` that sets:
+  - `cli.WithParserConfig(cli.CobraParserConfig{AppName: "tuplespacectl"})`
+- Updated the command constructors to use that shared builder:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/health.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/out.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/rd.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/in.go`
+- Verified the env parsing behavior directly with:
+  - `TUPLESPACECTL_SERVER_URL=http://127.0.0.1:18081 TUPLESPACECTL_SPACE=jobs go run ./cmd/tuplespacectl tuple out --tuple-spec 'job,42,true' --print-parsed-fields`
+- Extended `tuple out` with a positional list argument:
+  - `tuple-specs...`
+- Added input-selection logic in `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go` so `tuple out` now accepts exactly one of:
+  - `--tuple-file`
+  - `--tuple-spec`
+  - positional `tuple-specs...`
+- Updated `tuple out` to emit one output row per inserted tuple, including an `index` field.
+- Added unit tests in `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common_test.go`.
+- Added built-binary CLI tests in `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go` covering:
+  - env defaults for `server-url` and `space`,
+  - multiple positional tuple specs for `tuple out`.
+- Ran:
+  - `go test ./cmd/tuplespacectl/... -count=1`
+  - `go test ./... -count=1`
+
+### Why
+
+- `server-url` and `space` are the most repetitive flags in normal CLI use, so they are exactly the right candidates for env defaults.
+- Multi-tuple `out` keeps the server semantics simple because it still maps to repeated `out` requests; there is no new batch API contract to maintain.
+- Reusing Glazed’s built-in env support is better than adding custom flag/env code because it preserves the standard parse precedence and makes `--print-parsed-fields` trustworthy.
+
+### What worked
+
+- `--print-parsed-fields` now shows `source: env` for:
+  - `TUPLESPACECTL_SERVER_URL`
+  - `TUPLESPACECTL_SPACE`
+- The built-binary env-default test passed.
+- The built-binary multi-positional-`out` test passed and verified two separate tuples could be consumed afterward.
+- Full-tree regression testing stayed green.
+
+### What didn't work
+
+- N/A. Once the commands were switched to the shared Glazed builder with `AppName`, the env behavior worked as expected.
+
+### What I learned
+
+- Glazed already had the exact env support needed here; the only missing piece was that the CLI was not supplying an `AppName`, so the default middleware chain never added `FromEnv(...)`.
+- For `tuple out`, positional tuple specs are the most natural syntax for multi-insert because they map cleanly onto Cobra/Glazed list-argument parsing.
+
+### What was tricky to build
+
+- The main subtlety was input-source precedence. Once positional tuple specs exist, `tuple out` has three possible tuple sources, so the command must reject mixed input sources explicitly rather than trying to guess which one wins.
+- Another important detail was preserving operator feedback. If one command inserts multiple tuples, the output must make that visible, which is why each emitted row includes an insertion `index`.
+
+### What warrants a second pair of eyes
+
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go`, especially the `LoadTupleInputs` source-selection logic.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/out.go`, especially the positional-argument definition and the one-row-per-tuple output behavior.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`, especially the built-binary env-default and multi-out flows.
+
+### What should be done in the future
+
+- Add a short help page or README snippet documenting the env keys:
+  - `TUPLESPACECTL_SERVER_URL`
+  - `TUPLESPACECTL_SPACE`
+- Consider whether `rd` and `in` should also gain positional template arguments for symmetry with `out`.
+
+### Code review instructions
+
+- Start with:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/out.go`
+- Then review:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/health.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/rd.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/in.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common_test.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`
+- Validate with:
+  - `TUPLESPACECTL_SERVER_URL=http://127.0.0.1:18081 TUPLESPACECTL_SPACE=jobs go run ./cmd/tuplespacectl tuple out --tuple-spec 'job,42,true' --print-parsed-fields`
+  - `go test ./cmd/tuplespacectl/... -count=1`
+  - `go test ./... -count=1`
+
+### Technical details
+
+- Env keys now supported by the CLI:
+  - `TUPLESPACECTL_SERVER_URL`
+  - `TUPLESPACECTL_SPACE`
+- New multi-out examples:
+  - `tuplespacectl tuple out --space jobs 'job,1,true' 'job,2,false'`
+  - `tuplespacectl tuple out 'job,1,true' 'job,2,false'` when `TUPLESPACECTL_SPACE` is set
+- `tuple out` still supports:
+  - `--tuple-file`
+  - `--tuple-spec`
+- Mixed input sources are rejected explicitly.
 
 ## Context
 
