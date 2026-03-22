@@ -14,17 +14,17 @@ type Config struct {
 	ShutdownGrace  time.Duration
 }
 
-func LoadFromEnv() (Config, error) {
-	cfg := Config{
+func DefaultsFromEnv() Config {
+	return Config{
 		HTTPListenAddr: defaultEnv("TUPLESPACE_HTTP_LISTEN_ADDR", ":8080"),
 		DatabaseURL:    os.Getenv("TUPLESPACE_DATABASE_URL"),
 		CandidateLimit: 64,
 		ShutdownGrace:  10 * time.Second,
 	}
-	if cfg.DatabaseURL == "" {
-		return Config{}, fmt.Errorf("TUPLESPACE_DATABASE_URL is required")
-	}
+}
 
+func LoadFromEnv() (Config, error) {
+	cfg := DefaultsFromEnv()
 	if rawLimit := os.Getenv("TUPLESPACE_CANDIDATE_LIMIT"); rawLimit != "" {
 		limit, err := strconv.Atoi(rawLimit)
 		if err != nil {
@@ -41,7 +41,20 @@ func LoadFromEnv() (Config, error) {
 		cfg.ShutdownGrace = grace
 	}
 
-	return cfg, nil
+	return cfg, Validate(cfg)
+}
+
+func Validate(cfg Config) error {
+	if cfg.DatabaseURL == "" {
+		return fmt.Errorf("TUPLESPACE_DATABASE_URL is required")
+	}
+	if cfg.CandidateLimit <= 0 {
+		return fmt.Errorf("candidate limit must be > 0")
+	}
+	if cfg.ShutdownGrace <= 0 {
+		return fmt.Errorf("shutdown grace must be > 0")
+	}
+	return nil
 }
 
 func defaultEnv(key, fallback string) string {

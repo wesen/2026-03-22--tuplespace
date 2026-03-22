@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 
 	"github.com/manuel/wesen/tuplespace/internal/match"
 	"github.com/manuel/wesen/tuplespace/internal/notify"
@@ -62,7 +63,15 @@ func (s *Service) Out(ctx context.Context, space string, tuple types.Tuple) erro
 	if _, err := tx.Exec(ctx, `SELECT pg_notify($1, '')`, notify.ChannelName(space)); err != nil {
 		return fmt.Errorf("notify listeners: %w", err)
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit out transaction: %w", err)
+	}
+
+	log.Debug().
+		Str("space", space).
+		Int("arity", len(normalizedTuple.Fields)).
+		Msg("stored tuple")
+	return nil
 }
 
 func (s *Service) Rd(ctx context.Context, space string, template types.Template, wait time.Duration) (types.Tuple, types.Bindings, error) {
@@ -101,6 +110,13 @@ func (s *Service) read(ctx context.Context, space string, template types.Templat
 		return types.Tuple{}, nil, fmt.Errorf("wait duration must be >= 0")
 	}
 
+	log.Debug().
+		Str("space", space).
+		Bool("destructive", destructive).
+		Dur("wait", wait).
+		Int("arity", len(normalizedTemplate.Fields)).
+		Msg("starting tuple read")
+
 	opCtx, cancel := withOptionalTimeout(ctx, wait)
 	defer cancel()
 
@@ -120,6 +136,10 @@ func (s *Service) read(ctx context.Context, space string, template types.Templat
 				return types.Tuple{}, nil, err
 			}
 			if found {
+				log.Debug().
+					Str("space", space).
+					Bool("destructive", destructive).
+					Msg("matched tuple")
 				return tuple, bindings, nil
 			}
 		} else {
@@ -128,21 +148,42 @@ func (s *Service) read(ctx context.Context, space string, template types.Templat
 				return types.Tuple{}, nil, err
 			}
 			if found {
+				log.Debug().
+					Str("space", space).
+					Bool("destructive", destructive).
+					Msg("matched tuple")
 				return tuple, bindings, nil
 			}
 		}
 
 		if wait == 0 {
+			log.Debug().
+				Str("space", space).
+				Bool("destructive", destructive).
+				Msg("no matching tuple found")
 			return types.Tuple{}, nil, ErrNotFound
 		}
 
+		log.Debug().
+			Str("space", space).
+			Bool("destructive", destructive).
+			Msg("waiting for tuple notification")
 		select {
 		case <-opCtx.Done():
 			if opCtx.Err() == context.DeadlineExceeded {
+				log.Debug().
+					Str("space", space).
+					Bool("destructive", destructive).
+					Dur("wait", wait).
+					Msg("tuple read timed out")
 				return types.Tuple{}, nil, ErrTimeout
 			}
 			return types.Tuple{}, nil, opCtx.Err()
 		case <-sub.C():
+			log.Debug().
+				Str("space", space).
+				Bool("destructive", destructive).
+				Msg("retrying tuple read after notification")
 		}
 	}
 }

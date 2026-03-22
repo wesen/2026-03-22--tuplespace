@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/rs/zerolog/log"
 )
 
 type Subscription interface {
@@ -19,6 +22,11 @@ type Notifier struct {
 	conn      *pgx.Conn
 	controlCh chan controlRequest
 	doneCh    chan struct{}
+}
+
+type waitResult struct {
+	notification *pgconn.Notification
+	err          error
 }
 
 type controlRequest struct {
@@ -51,6 +59,7 @@ func New(ctx context.Context, databaseURL string) (*Notifier, error) {
 		controlCh: make(chan controlRequest),
 		doneCh:    make(chan struct{}),
 	}
+	log.Debug().Msg("initialized notifier connection")
 	go notifier.loop()
 	return notifier, nil
 }
@@ -74,6 +83,11 @@ func (n *Notifier) Subscribe(space string) (Subscription, error) {
 		}
 		st.refCounts[channel]++
 		st.subscribers[channel][sub] = struct{}{}
+		log.Debug().
+			Str("space", space).
+			Str("channel", channel).
+			Int("subscriber_count", st.refCounts[channel]).
+			Msg("subscribed to tuplespace notifications")
 		return nil
 	}); err != nil {
 		return nil, err
@@ -104,30 +118,47 @@ func (n *Notifier) loop() {
 	defer n.conn.Close(context.Background())
 
 	for {
-		select {
-		case req := <-n.controlCh:
-			req.resp <- req.apply(st)
-			if st.closed {
-				return
-			}
-			continue
-		default:
-		}
-
-		waitCtx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
-		notification, err := n.conn.WaitForNotification(waitCtx)
-		cancel()
-		if err == nil && notification != nil {
-			for sub := range st.subscribers[notification.Channel] {
-				select {
-				case sub.ch <- struct{}{}:
-				default:
-				}
-			}
-		}
-
 		if st.closed {
 			return
+		}
+
+		if len(st.refCounts) == 0 {
+			req := <-n.controlCh
+			req.resp <- req.apply(st)
+			continue
+		}
+
+		waitCtx, cancel := context.WithCancel(context.Background())
+		waitCh := make(chan waitResult, 1)
+		go func() {
+			notification, err := n.conn.WaitForNotification(waitCtx)
+			waitCh <- waitResult{notification: notification, err: err}
+		}()
+
+		select {
+		case req := <-n.controlCh:
+			cancel()
+			result := <-waitCh
+			if result.notification != nil {
+				deliverNotification(st, result.notification)
+			}
+			if result.err != nil && !errors.Is(result.err, context.Canceled) {
+				log.Warn().Err(result.err).Msg("interrupted notification wait returned unexpected error")
+			}
+			req.resp <- req.apply(st)
+		case result := <-waitCh:
+			cancel()
+			if result.err != nil {
+				if errors.Is(result.err, context.Canceled) {
+					continue
+				}
+				log.Error().Err(result.err).Msg("wait for postgres notification failed")
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			if result.notification != nil {
+				deliverNotification(st, result.notification)
+			}
 		}
 	}
 }
@@ -160,6 +191,10 @@ func (n *Notifier) unsubscribe(sub *subscription) error {
 			}
 		}
 		close(sub.ch)
+		log.Debug().
+			Str("channel", sub.channel).
+			Int("remaining_subscribers", st.refCounts[sub.channel]).
+			Msg("unsubscribed from tuplespace notifications")
 		return nil
 	})
 }
@@ -175,4 +210,29 @@ func (s *subscription) Close() error {
 func ChannelName(space string) string {
 	sum := sha1.Sum([]byte(space))
 	return "tuplespace_" + hex.EncodeToString(sum[:8])
+}
+
+func deliverNotification(st *state, notification *pgconn.Notification) {
+	subscribers := st.subscribers[notification.Channel]
+	if len(subscribers) == 0 {
+		log.Debug().
+			Str("channel", notification.Channel).
+			Msg("received notification without active subscribers")
+		return
+	}
+
+	delivered := 0
+	for sub := range subscribers {
+		select {
+		case sub.ch <- struct{}{}:
+			delivered++
+		default:
+		}
+	}
+
+	log.Debug().
+		Str("channel", notification.Channel).
+		Int("subscriber_count", len(subscribers)).
+		Int("delivered_count", delivered).
+		Msg("delivered postgres notification")
 }

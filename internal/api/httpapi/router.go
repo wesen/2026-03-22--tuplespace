@@ -35,7 +35,7 @@ func NewHandler(service service.TupleSpace) http.Handler {
 			http.NotFound(w, r)
 		}
 	})
-	return mux
+	return withAccessLog(mux)
 }
 
 func parseSpacePath(path string) (space string, operation string, ok bool) {
