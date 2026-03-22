@@ -52,3 +52,12 @@ Implemented the notifier, service, HTTP API, server binary, and Glazed CLI with 
 - /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go — Built-binary CLI smoke test added and stabilized in the second code milestone
 - /home/manuel/code/wesen/2026-03-22--tuplespace/internal/service/service.go — TupleSpace runtime semantics implemented in the second code milestone
 
+
+## 2026-03-22
+
+Added a compact CLI DSL for tuple and template inputs with end-to-end validation against the live server path (commit b7eb804)
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go — Added tuple/template DSL parsing and input selection helpers
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go — Extended the built-binary CLI smoke test to exercise the DSL path

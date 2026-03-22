@@ -18,7 +18,7 @@ RelatedFiles:
       Note: Primary deliverable produced during the ticket work
 ExternalSources: []
 Summary: Chronological diary of the investigation, ticket setup, design writing, validation, and delivery work for the TupleSpace implementation ticket.
-LastUpdated: 2026-03-22T12:30:39.967501917-04:00
+LastUpdated: 2026-03-22T16:23:04-04:00
 WhatFor: Capture what was done, why it was done, what evidence shaped the design, and how the deliverables were validated and delivered.
 WhenToUse: Use when reviewing the ticket work, continuing the implementation effort, or reconstructing the design decisions and delivery steps.
 ---
@@ -549,6 +549,122 @@ This was the most failure-prone step because it crossed package boundaries and p
   - `tuple out` succeeded,
   - `tuple in` returned the tuple and bindings,
   - a following `tuple rd` failed with `Error: not_found: tuple not found`
+
+## Step 6: Add A Compact CLI DSL For Tuple And Template Queries
+
+The next change was to make the CLI easier to drive without writing JSON files for every tuple and template. The goal was not to replace the HTTP or storage contracts, but to add a compact operator-facing syntax on top of the existing CLI so the underlying system semantics remained unchanged.
+
+I kept the change intentionally narrow: the DSL exists only in the CLI loader layer, the existing `--tuple-file` and `--template-json-file` flags still work, and the new path is exercised by both parser unit tests and the built-binary end-to-end CLI test against a live Postgres-backed service.
+
+### Prompt Context
+
+**User prompt (verbatim):**
+
+```text
+invent some kind of compact query dsl to formulate the tuple queries
+```
+
+**Assistant interpretation:** Design and implement a concise textual syntax for tuples and templates so the CLI can express queries directly without forcing JSON files.
+
+**Inferred user intent:** Make TupleSpace operations faster to use interactively while preserving the current implementation and test discipline.
+
+**Commit (code):** `b7eb804` — `Add compact tuple DSL to CLI`
+
+### What I did
+
+- Added compact input helpers in `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go`.
+- Added:
+  - `LoadTupleInput(path, spec)`
+  - `LoadTemplateInput(path, spec)`
+  - `ParseTupleSpec(spec)`
+  - `ParseTemplateSpec(spec)`
+- Implemented a compact DSL with these rules:
+  - comma-separated fields,
+  - optional surrounding parentheses,
+  - bare literals infer type,
+  - double-quoted literals force string,
+  - template formal bindings use `?name:type`.
+- Chosen examples:
+  - tuple: `job,42,true`
+  - tuple: `("job with spaces",42,false)`
+  - template: `job,?id:int,?ready:bool`
+- Wired the new flags into the Glazed commands:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/out.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/rd.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/in.go`
+- Added parser tests in `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common_test.go`.
+- Extended the process-level smoke test in `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go` to round-trip through the new DSL flags against a real running server and Docker-backed Postgres.
+- Ran:
+  - `gofmt -w cmd/tuplespacectl/cmds/common.go cmd/tuplespacectl/cmds/common_test.go cmd/tuplespacectl/cmds/tuple/out.go cmd/tuplespacectl/cmds/tuple/rd.go cmd/tuplespacectl/cmds/tuple/in.go cmd/tuplespacectl/main_test.go`
+  - `go test ./cmd/tuplespacectl/cmds -count=1`
+  - `go test ./cmd/tuplespacectl -count=1`
+  - `go test ./... -count=1`
+
+### Why
+
+- The original CLI was correct but awkward for interactive use because every query had to be placed in a JSON file first.
+- A compact DSL belongs at the CLI edge because it improves ergonomics without forcing any change to the server API, persistence model, or matcher semantics.
+- Keeping the JSON-file path intact preserves explicit, scriptable payloads for more formal or repeatable workflows.
+
+### What worked
+
+- The chosen syntax was expressive enough for the current type system without being verbose.
+- The parser fit cleanly into the existing `common.go` loader layer.
+- The full end-to-end CLI test passed with the new `--tuple-spec` and `--template-spec` flags.
+- Full-tree regression testing still passed after the feature landed.
+
+### What didn't work
+
+- N/A. This step did not hit a blocking implementation failure after the syntax was chosen.
+
+### What I learned
+
+- The simplest useful DSL is enough here. Because the supported type system is only `string`, `int`, and `bool`, heavy grammar machinery would have been overkill.
+- Keeping type inference only at the CLI boundary avoids spreading syntax concerns into the transport or persistence layers.
+- The biggest usability edge is ambiguity around numeric-looking or boolean-looking strings. Double quotes are the correct escape hatch.
+
+### What was tricky to build
+
+- The sharp edge was ambiguity, not parsing mechanics. A token like `42` should become an integer, while `"42"` must remain a string. Likewise `true` means boolean true, while `"true"` must remain a string. The parser therefore had to be explicit about inference rules and quoted-string behavior.
+- Another subtle point was keeping the feature additive. The commands now need to reject conflicting input sources cleanly when both the JSON-file flag and the DSL flag are provided.
+
+### What warrants a second pair of eyes
+
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go`, especially the field splitter and literal inference rules.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`, especially the DSL end-to-end assertions for bindings.
+- The chosen formal syntax `?name:type`, which is clear now but should be revisited if richer template operators are added later.
+
+### What should be done in the future
+
+- If the DSL grows, move it into a dedicated parser package and document the grammar formally.
+- Add CLI help pages or examples for common query shapes so operators do not need to infer the syntax from source or tests.
+- Consider a stdin-oriented path later if interactive shell use becomes more important than one-line invocation.
+
+### Code review instructions
+
+- Start in `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go`.
+- Then review:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/out.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/rd.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/in.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common_test.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`
+- Validate with:
+  - `go test ./cmd/tuplespacectl/cmds -count=1`
+  - `go test ./cmd/tuplespacectl -count=1`
+  - `go test ./... -count=1`
+
+### Technical details
+
+- Current compact syntax:
+  - tuple fields: `job,42,true`
+  - template fields: `job,?id:int,?ready:bool`
+  - strings with spaces or numeric/boolean-looking content: `"job with spaces"`, `"42"`, `"true"`
+- Current CLI flags:
+  - `tuplespacectl tuple out --space jobs --tuple-spec 'job,42,true'`
+  - `tuplespacectl tuple rd --space jobs --template-spec 'job,?id:int,?ready:bool'`
+  - `tuplespacectl tuple in --space jobs --template-spec 'job,?id:int,?ready:bool'`
+- The DSL is intentionally CLI-only; the HTTP request/response JSON contracts remain unchanged.
 
 ## Context
 
