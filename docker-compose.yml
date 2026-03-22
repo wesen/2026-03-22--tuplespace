@@ -16,5 +16,25 @@ services:
     volumes:
       - tuplespace-postgres-data:/var/lib/postgresql/data
 
+  tuplespaced:
+    build:
+      context: ..
+      dockerfile: 2026-03-22--tuplespace/Dockerfile
+    container_name: tuplespace-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TUPLESPACE_DATABASE_URL: postgres://postgres:postgres@postgres:5432/tuplespace?sslmode=disable
+      TUPLESPACE_HTTP_LISTEN_ADDR: :8080
+      TUPLESPACE_CANDIDATE_LIMIT: "64"
+    ports:
+      - "18081:8080"
+    command:
+      - --log-format
+      - json
+      - --log-level
+      - info
+
 volumes:
   tuplespace-postgres-data:
