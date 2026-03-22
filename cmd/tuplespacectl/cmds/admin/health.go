@@ -3,7 +3,6 @@ package admin
 import (
 	"context"
 
-	"github.com/go-go-golems/glazed/pkg/cli"
 	"github.com/go-go-golems/glazed/pkg/cmds"
 	"github.com/go-go-golems/glazed/pkg/cmds/fields"
 	"github.com/go-go-golems/glazed/pkg/cmds/schema"
@@ -12,6 +11,7 @@ import (
 	glazedtypes "github.com/go-go-golems/glazed/pkg/types"
 	"github.com/spf13/cobra"
 
+	cmdshared "github.com/manuel/wesen/tuplespace/cmd/tuplespacectl/cmds"
 	"github.com/manuel/wesen/tuplespace/internal/client"
 )
 
@@ -28,7 +28,7 @@ func NewHealthCommand() (*cobra.Command, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cli.BuildCobraCommandFromCommand(command)
+	return cmdshared.BuildCobraCommand(command)
 }
 
 func newHealthCommand() (*HealthCommand, error) {

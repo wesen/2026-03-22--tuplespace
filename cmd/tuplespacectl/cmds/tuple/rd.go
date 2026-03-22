@@ -3,7 +3,6 @@ package tuple
 import (
 	"context"
 
-	"github.com/go-go-golems/glazed/pkg/cli"
 	"github.com/go-go-golems/glazed/pkg/cmds"
 	"github.com/go-go-golems/glazed/pkg/cmds/fields"
 	"github.com/go-go-golems/glazed/pkg/cmds/schema"
@@ -33,7 +32,7 @@ func NewRdCommand() (*cobra.Command, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cli.BuildCobraCommandFromCommand(command)
+	return sharedcmds.BuildCobraCommand(command)
 }
 
 func newRdCommand() (*RdCommand, error) {

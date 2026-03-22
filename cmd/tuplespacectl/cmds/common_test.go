@@ -40,6 +40,32 @@ func TestLoadTupleInputRejectsConflictingInputs(t *testing.T) {
 	require.EqualError(t, err, "provide either tuple-file or tuple-spec, not both")
 }
 
+func TestLoadTupleInputsParsesMultipleTupleSpecs(t *testing.T) {
+	tuples, err := LoadTupleInputs("", "", []string{`job,1,true`, `"worker",2,false`})
+	require.NoError(t, err)
+	require.Equal(t, []types.Tuple{
+		{
+			Fields: []types.TupleField{
+				{Type: types.TypeString, Value: "job"},
+				{Type: types.TypeInt, Value: int64(1)},
+				{Type: types.TypeBool, Value: true},
+			},
+		},
+		{
+			Fields: []types.TupleField{
+				{Type: types.TypeString, Value: "worker"},
+				{Type: types.TypeInt, Value: int64(2)},
+				{Type: types.TypeBool, Value: false},
+			},
+		},
+	}, tuples)
+}
+
+func TestLoadTupleInputsRejectsMixedSources(t *testing.T) {
+	_, err := LoadTupleInputs("", `job,1,true`, []string{`job,2,false`})
+	require.EqualError(t, err, "provide exactly one tuple input source: tuple-file, tuple-spec, or tuple-spec arguments")
+}
+
 func TestParseTemplateSpecRejectsMalformedFormalField(t *testing.T) {
 	_, err := ParseTemplateSpec(`job,?id`)
 	require.EqualError(t, err, `parse template field 1: formal field "?id" must use ?name:type`)

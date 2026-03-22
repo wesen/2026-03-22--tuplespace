@@ -8,8 +8,22 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-go-golems/glazed/pkg/cli"
+	"github.com/go-go-golems/glazed/pkg/cmds"
 	"github.com/manuel/wesen/tuplespace/internal/types"
+	"github.com/spf13/cobra"
 )
+
+const AppName = "tuplespacectl"
+
+func BuildCobraCommand(command cmds.Command) (*cobra.Command, error) {
+	return cli.BuildCobraCommandFromCommand(
+		command,
+		cli.WithParserConfig(cli.CobraParserConfig{
+			AppName: AppName,
+		}),
+	)
+}
 
 func LoadTuple(path string) (types.Tuple, error) {
 	body, err := os.ReadFile(path)
@@ -59,6 +73,49 @@ func LoadTupleInput(path string, spec string) (types.Tuple, error) {
 		return ParseTupleSpec(spec)
 	default:
 		return types.Tuple{}, fmt.Errorf("one of tuple-file or tuple-spec is required")
+	}
+}
+
+func LoadTupleInputs(path string, spec string, specs []string) ([]types.Tuple, error) {
+	sources := 0
+	if path != "" {
+		sources++
+	}
+	if spec != "" {
+		sources++
+	}
+	if len(specs) > 0 {
+		sources++
+	}
+	if sources > 1 {
+		return nil, fmt.Errorf("provide exactly one tuple input source: tuple-file, tuple-spec, or tuple-spec arguments")
+	}
+
+	switch {
+	case path != "":
+		tuple, err := LoadTuple(path)
+		if err != nil {
+			return nil, err
+		}
+		return []types.Tuple{tuple}, nil
+	case spec != "":
+		tuple, err := ParseTupleSpec(spec)
+		if err != nil {
+			return nil, err
+		}
+		return []types.Tuple{tuple}, nil
+	case len(specs) > 0:
+		tuples := make([]types.Tuple, len(specs))
+		for i, tupleSpec := range specs {
+			tuple, err := ParseTupleSpec(tupleSpec)
+			if err != nil {
+				return nil, fmt.Errorf("parse tuple-spec argument %d: %w", i, err)
+			}
+			tuples[i] = tuple
+		}
+		return tuples, nil
+	default:
+		return nil, fmt.Errorf("one of tuple-file, tuple-spec, or tuple-spec arguments is required")
 	}
 }
 

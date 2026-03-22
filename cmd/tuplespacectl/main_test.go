@@ -51,6 +51,46 @@ func TestCLITupleRoundTripWithDSL(t *testing.T) {
 	require.Contains(t, output, `"ready": true`)
 }
 
+func TestCLIUsesEnvDefaultsForServerURLAndSpace(t *testing.T) {
+	db := testpostgres.Start(t)
+	serverBin := buildBinary(t, "tuplespaced", "./cmd/tuplespaced")
+	cliBin := buildBinary(t, "tuplespacectl", "./cmd/tuplespacectl")
+	serverURL, stop := startServerProcess(t, serverBin, db.URL)
+	defer stop()
+
+	env := []string{
+		"TUPLESPACECTL_SERVER_URL=" + serverURL,
+		"TUPLESPACECTL_SPACE=jobs",
+	}
+
+	runCLIWithEnv(t, cliBin, env, "admin", "health", "--output", "json")
+	runCLIWithEnv(t, cliBin, env, "tuple", "out", "--tuple-spec", `job,77,false`, "--output", "json")
+	output := runCLIWithEnv(t, cliBin, env, "tuple", "rd", "--template-spec", `job,?id:int,?ready:bool`, "--output", "json")
+	require.Contains(t, output, `"ok": true`)
+	require.Contains(t, output, `"id": 77`)
+	require.Contains(t, output, `"ready": false`)
+}
+
+func TestCLIOutAcceptsMultiplePositionalTupleSpecs(t *testing.T) {
+	db := testpostgres.Start(t)
+	serverBin := buildBinary(t, "tuplespaced", "./cmd/tuplespaced")
+	cliBin := buildBinary(t, "tuplespacectl", "./cmd/tuplespacectl")
+	serverURL, stop := startServerProcess(t, serverBin, db.URL)
+	defer stop()
+
+	output := runCLI(t, cliBin, serverURL, "tuple", "out", "--space", "jobs", "--output", "json", `job,1,true`, `job,2,false`)
+	require.Contains(t, output, `"index": 0`)
+	require.Contains(t, output, `"index": 1`)
+
+	first := runCLI(t, cliBin, serverURL, "tuple", "in", "--space", "jobs", "--template-spec", `job,?id:int,?ready:bool`, "--output", "json")
+	require.Contains(t, first, `"id": 1`)
+	require.Contains(t, first, `"ready": true`)
+
+	second := runCLI(t, cliBin, serverURL, "tuple", "in", "--space", "jobs", "--template-spec", `job,?id:int,?ready:bool`, "--output", "json")
+	require.Contains(t, second, `"id": 2`)
+	require.Contains(t, second, `"ready": false`)
+}
+
 func startServerProcess(t *testing.T, serverBin string, databaseURL string) (string, func()) {
 	t.Helper()
 
@@ -142,6 +182,16 @@ func runCLI(t *testing.T, cliBin string, serverURL string, args ...string) strin
 	allArgs := append([]string{}, args...)
 	allArgs = append(allArgs, "--server-url", serverURL)
 	cmd := exec.Command(cliBin, allArgs...)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+	return string(output)
+}
+
+func runCLIWithEnv(t *testing.T, cliBin string, env []string, args ...string) string {
+	t.Helper()
+
+	cmd := exec.Command(cliBin, args...)
+	cmd.Env = append(os.Environ(), env...)
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 	return string(output)
