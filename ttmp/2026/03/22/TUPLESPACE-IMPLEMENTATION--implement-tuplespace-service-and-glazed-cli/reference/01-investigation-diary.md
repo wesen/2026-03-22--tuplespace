@@ -18,7 +18,7 @@ RelatedFiles:
       Note: Primary deliverable produced during the ticket work
 ExternalSources: []
 Summary: Chronological diary of the investigation, ticket setup, design writing, validation, and delivery work for the TupleSpace implementation ticket.
-LastUpdated: 2026-03-22T16:23:04-04:00
+LastUpdated: 2026-03-22T16:34:15-04:00
 WhatFor: Capture what was done, why it was done, what evidence shaped the design, and how the deliverables were validated and delivered.
 WhenToUse: Use when reviewing the ticket work, continuing the implementation effort, or reconstructing the design decisions and delivery steps.
 ---
@@ -665,6 +665,157 @@ invent some kind of compact query dsl to formulate the tuple queries
   - `tuplespacectl tuple rd --space jobs --template-spec 'job,?id:int,?ready:bool'`
   - `tuplespacectl tuple in --space jobs --template-spec 'job,?id:int,?ready:bool'`
 - The DSL is intentionally CLI-only; the HTTP request/response JSON contracts remain unchanged.
+
+## Step 7: Add Compose-Backed Postgres Startup, Move Server Logging To Glazed, And Remove Idle CPU Spin
+
+The next step was operational rather than semantic. The goal was to make local startup easier with `docker compose`, put `tuplespaced` on the same Glazed/Cobra-style logging path as the CLI, and fix the notifier so an idle server does not sit in a poll loop that can burn unnecessary CPU.
+
+This step also had a real environment wrinkle that mattered: the first compose port choice was already occupied locally, so the validation path had to include a real conflict, a compose file adjustment, and then a fresh live run instead of a theoretical "looks good" answer.
+
+### Prompt Context
+
+**User prompt (verbatim):**
+
+```text
+add docker compose for postgres, run it again, add logs (zerolog), and make sure it doesn't eat 100% CPU
+```
+
+**User prompt (verbatim):**
+
+```text
+don't we have logging setup thruoguh glazed? are we using glazed?
+```
+
+**User prompt (verbatim):**
+
+```text
+use tuplespaced with glazed as well, and setup logging too
+```
+
+**Assistant interpretation:** Add a local Postgres compose setup, re-run the system against it, add structured logging in the server, and fix the notifier so idle operation does not spin. After the logging question, move the server binary onto the Glazed/Cobra logging path instead of keeping a separate ad hoc logger setup.
+
+**Inferred user intent:** Make the TupleSpace server operationally sane for local development: easy to start, observable, and cheap to leave running.
+
+**Commit (code):** `a8c7773` — `Add Glazed logging and compose-backed server run`
+
+### What I did
+
+- Added `/home/manuel/code/wesen/2026-03-22--tuplespace/docker-compose.yml` for a local Postgres service with a healthcheck and a persistent named volume.
+- Reworked `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespaced/main.go` so `tuplespaced` is now a real Glazed bare command rather than a plain `main()` wrapper.
+- Wired server logging through Glazed/Cobra with:
+  - `glazed/pkg/cmds/logging.AddLoggingSectionToRootCommand`
+  - `glazed/pkg/cmds/logging.InitLoggerFromCobra`
+- Added startup and shutdown logs in `tuplespaced`.
+- Added HTTP access logging in `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/access_log.go` and wrapped the handler in `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/router.go`.
+- Added targeted debug logs to:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/service/service.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/notify/notifier.go`
+- Changed the notifier loop so it:
+  - blocks on control requests when there are no subscribers,
+  - waits interruptibly for Postgres notifications when there are subscribers,
+  - backs off on unexpected wait errors instead of immediately re-spinning.
+- Split configuration validation out in `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/config/config.go` so the Glazed command can use env-derived defaults without forcing validation during `--help`.
+- Added the transitive `lumberjack` dependency in `go.sum` and `go.mod` because Glazed’s logging helper requires it.
+- Ran:
+  - `gofmt -w cmd/tuplespaced/main.go internal/config/config.go internal/notify/notifier.go internal/service/service.go internal/api/httpapi/router.go internal/api/httpapi/access_log.go`
+  - `go get github.com/go-go-golems/glazed/pkg/cmds/logging@v1.0.5`
+  - `go test ./cmd/tuplespaced ./internal/notify ./internal/api/httpapi ./internal/service -count=1`
+  - `go test ./... -count=1`
+- Built manual binaries:
+  - `go build -o /tmp/tuplespaced-manual ./cmd/tuplespaced`
+  - `go build -o /tmp/tuplespacectl-manual ./cmd/tuplespacectl`
+- Ran the live stack with compose-backed Postgres:
+  - `docker compose up -d postgres`
+  - `/tmp/tuplespaced-manual --database-url 'postgres://postgres:postgres@127.0.0.1:15433/tuplespace?sslmode=disable' --http-listen-addr 127.0.0.1:18081 --log-format json --log-level debug`
+  - `/tmp/tuplespacectl-manual admin health --server-url http://127.0.0.1:18081 --output json`
+  - `/tmp/tuplespacectl-manual tuple out --server-url http://127.0.0.1:18081 --space jobs --tuple-spec 'job,42,true' --output json`
+  - `/tmp/tuplespacectl-manual tuple rd --server-url http://127.0.0.1:18081 --space jobs --template-spec 'job,?id:int,?ready:bool' --output json`
+  - `/tmp/tuplespacectl-manual tuple in --server-url http://127.0.0.1:18081 --space jobs --template-spec 'job,?id:int,?ready:bool' --output json`
+  - `/tmp/tuplespacectl-manual tuple rd --server-url http://127.0.0.1:18081 --space jobs --template-spec 'job,?id:int,?ready:bool' --output json`
+- Verified idle CPU with:
+  - `sleep 5 && ps -p $(cat /tmp/tuplespaced-manual.pid) -o pid=,%cpu=,etime=,time=,command=`
+
+### Why
+
+- The server needed to be observable in a way that matched the Glazed CLI conventions rather than splitting logging approaches across binaries.
+- The notifier loop is where idle CPU risk lives, so the fix had to be in the concurrency structure, not just in log messaging or a longer timeout.
+- A checked-in compose file is the simplest repeatable way to get a real Postgres instance for local startup outside the testcontainers path.
+
+### What worked
+
+- `tuplespaced` now starts through a Glazed/Cobra command and accepts the Glazed logging flags directly.
+- JSON request logs were emitted for `/healthz`, `out`, `rd`, and `in` during the live run.
+- Full-tree tests passed after the change.
+- The live compose-backed run succeeded end to end after the port adjustment.
+- The idle CPU sample after 5 seconds showed:
+  - `1488089  0.0       00:13 00:00:00 /tmp/tuplespaced-manual ...`
+  - This is the key evidence that the idle notifier path is no longer spinning.
+
+### What didn't work
+
+- The first compose run used `15432` and failed because the port was already taken:
+  - `Error response from daemon: ... listen tcp4 0.0.0.0:15432: bind: address already in use`
+- The first manual server launch failed because `zsh` treated the `?` in the Postgres URL as a glob:
+  - `zsh:1: no matches found: postgres://postgres:postgres@127.0.0.1:15433/tuplespace?sslmode=disable`
+- The first focused test pass after switching to Glazed logging failed because the repo was missing a `go.sum` entry for Glazed’s logging dependency:
+  - `missing go.sum entry for module providing package gopkg.in/natefinch/lumberjack.v2`
+
+### What I learned
+
+- For this codebase, "use Glazed too" on the server side does not mean the server has to emit structured table output. A Glazed bare command is the right fit because it gets flag parsing and logging integration without forcing a data-output abstraction onto a long-running HTTP server.
+- The strongest CPU fix was to stop waiting on Postgres entirely when there are no active subscribers.
+- Real manual runs continue to catch things the test suite does not, especially shell quoting issues and host port collisions.
+
+### What was tricky to build
+
+- The sharp edge in the notifier fix was preserving correctness while removing idle spin. The loop still needs to react promptly to subscribe and unsubscribe requests, but it also must not lose notifications or perform concurrent use of the same pgx connection. The chosen structure waits on the connection in a goroutine only while there are active subscriptions, cancels that wait when a control request arrives, drains the result, and then applies the state change before looping again.
+- Another subtlety was getting the Glazed logging setup onto the server without reintroducing the earlier custom logger path. That required moving `tuplespaced` itself onto a Glazed bare command so the binary can legitimately use `InitLoggerFromCobra`.
+
+### What warrants a second pair of eyes
+
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespaced/main.go`, especially the Glazed bare-command wiring and signal-handling flow.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/notify/notifier.go`, especially the interruptible wait structure around `WaitForNotification`.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/access_log.go`, especially if request logging later needs request IDs or byte counts.
+
+### What should be done in the future
+
+- Add a short operator runbook showing the standard `docker compose up -d postgres` plus `tuplespaced` startup command.
+- Consider moving the compose port into an env-substituted value if local port conflicts become common.
+- If notifier complexity grows, isolate the wait/control state machine into a smaller internal helper with its own focused tests.
+
+### Code review instructions
+
+- Start with:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespaced/main.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/notify/notifier.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/access_log.go`
+- Then validate with:
+  - `go test ./... -count=1`
+  - `docker compose up -d postgres`
+  - `go build -o /tmp/tuplespaced-manual ./cmd/tuplespaced`
+  - `go build -o /tmp/tuplespacectl-manual ./cmd/tuplespacectl`
+- For the idle CPU check:
+  - start `tuplespaced`,
+  - wait 5 seconds,
+  - run `ps -p <pid> -o pid=,%cpu=,etime=,time=,command=`
+
+### Technical details
+
+- Final compose port:
+  - `15433`
+- Example live server startup:
+  - `/tmp/tuplespaced-manual --database-url 'postgres://postgres:postgres@127.0.0.1:15433/tuplespace?sslmode=disable' --http-listen-addr 127.0.0.1:18081 --log-format json --log-level debug`
+- Example observed startup logs:
+  - `starting tuplespaced`
+  - `connected to postgres`
+  - `applied database migrations`
+  - `initialized postgres notifier`
+  - `http server listening`
+- Example observed access logs:
+  - `POST /v1/spaces/jobs/out` with `201`
+  - `POST /v1/spaces/jobs/rd` with `200`
+  - `POST /v1/spaces/jobs/in` with `200`
+  - final `POST /v1/spaces/jobs/rd` with `404`
 
 ## Context
 

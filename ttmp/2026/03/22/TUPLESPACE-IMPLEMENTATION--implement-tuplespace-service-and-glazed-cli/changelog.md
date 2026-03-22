@@ -61,3 +61,14 @@ Added a compact CLI DSL for tuple and template inputs with end-to-end validation
 
 - /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go — Added tuple/template DSL parsing and input selection helpers
 - /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go — Extended the built-binary CLI smoke test to exercise the DSL path
+
+
+## 2026-03-22
+
+Added compose-backed local Postgres startup, moved tuplespaced onto Glazed/Cobra logging, and fixed the notifier idle path so the server stays at low CPU when idle (commit a8c7773)
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespaced/main.go — Reworked tuplespaced into a Glazed bare command with Glazed logging initialization
+- /home/manuel/code/wesen/2026-03-22--tuplespace/internal/notify/notifier.go — Replaced the polling-style wait loop with an interruptible notification wait that blocks cleanly when idle
+- /home/manuel/code/wesen/2026-03-22--tuplespace/docker-compose.yml — Added local Postgres compose startup for real manual runs
