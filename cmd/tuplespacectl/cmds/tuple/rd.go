@@ -24,6 +24,7 @@ type RdSettings struct {
 	ServerURL        string `glazed:"server-url"`
 	Space            string `glazed:"space"`
 	TemplateJSONFile string `glazed:"template-json-file"`
+	TemplateSpec     string `glazed:"template-spec"`
 	WaitMS           int    `glazed:"wait-ms"`
 }
 
@@ -39,10 +40,19 @@ func newRdCommand() (*RdCommand, error) {
 	desc := cmds.NewCommandDescription(
 		"rd",
 		cmds.WithShort("Read a matching tuple without consuming it"),
+		cmds.WithLong(`Read a matching tuple without consuming it.
+
+Provide either --template-json-file with JSON or --template-spec with the compact DSL.
+
+Examples:
+  tuplespacectl tuple rd --space jobs --template-spec 'job,?id:int'
+  tuplespacectl tuple rd --space jobs --template-spec '("job with spaces",?id:int,false)'
+`),
 		cmds.WithFlags(
 			fields.New("server-url", fields.TypeString, fields.WithDefault("http://127.0.0.1:8080"), fields.WithHelp("TupleSpace server base URL")),
 			fields.New("space", fields.TypeString, fields.WithHelp("Tuple space name")),
 			fields.New("template-json-file", fields.TypeString, fields.WithHelp("Path to a template JSON file")),
+			fields.New("template-spec", fields.TypeString, fields.WithHelp("Compact template DSL, for example: job,?id:int")),
 			fields.New("wait-ms", fields.TypeInteger, fields.WithDefault(0), fields.WithHelp("How long to wait for a matching tuple")),
 		),
 	)
@@ -55,7 +65,7 @@ func (c *RdCommand) RunIntoGlazeProcessor(ctx context.Context, vals *values.Valu
 		return err
 	}
 
-	template, err := sharedcmds.LoadTemplate(settings.TemplateJSONFile)
+	template, err := sharedcmds.LoadTemplateInput(settings.TemplateJSONFile, settings.TemplateSpec)
 	if err != nil {
 		return err
 	}

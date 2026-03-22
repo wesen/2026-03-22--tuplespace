@@ -37,6 +37,20 @@ func TestCLIHealthAndTupleRoundTrip(t *testing.T) {
 	require.Contains(t, output, `"space": "jobs"`)
 }
 
+func TestCLITupleRoundTripWithDSL(t *testing.T) {
+	db := testpostgres.Start(t)
+	serverBin := buildBinary(t, "tuplespaced", "./cmd/tuplespaced")
+	cliBin := buildBinary(t, "tuplespacectl", "./cmd/tuplespacectl")
+	serverURL, stop := startServerProcess(t, serverBin, db.URL)
+	defer stop()
+
+	runCLI(t, cliBin, serverURL, "tuple", "out", "--space", "jobs", "--tuple-spec", `job,42,true`, "--output", "json")
+	output := runCLI(t, cliBin, serverURL, "tuple", "rd", "--space", "jobs", "--template-spec", `job,?id:int,?ready:bool`, "--output", "json")
+	require.Contains(t, output, `"ok": true`)
+	require.Contains(t, output, `"id": 42`)
+	require.Contains(t, output, `"ready": true`)
+}
+
 func startServerProcess(t *testing.T, serverBin string, databaseURL string) (string, func()) {
 	t.Helper()
 
