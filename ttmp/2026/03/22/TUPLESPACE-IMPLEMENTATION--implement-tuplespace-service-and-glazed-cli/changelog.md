@@ -72,3 +72,13 @@ Added compose-backed local Postgres startup, moved tuplespaced onto Glazed/Cobra
 - /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespaced/main.go — Reworked tuplespaced into a Glazed bare command with Glazed logging initialization
 - /home/manuel/code/wesen/2026-03-22--tuplespace/internal/notify/notifier.go — Replaced the polling-style wait loop with an interruptible notification wait that blocks cleanly when idle
 - /home/manuel/code/wesen/2026-03-22--tuplespace/docker-compose.yml — Added local Postgres compose startup for real manual runs
+
+
+## 2026-03-22
+
+Added a full compose stack for Postgres plus tuplespaced and validated the tutorial command sequence against the running containers (commit 97d5c4f)
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-03-22--tuplespace/Dockerfile — Builds tuplespaced and tuplespacectl inside a container image while rewriting the local Glazed replace target
+- /home/manuel/code/wesen/2026-03-22--tuplespace/docker-compose.yml — Runs both postgres and tuplespaced together with the server published on port 18081

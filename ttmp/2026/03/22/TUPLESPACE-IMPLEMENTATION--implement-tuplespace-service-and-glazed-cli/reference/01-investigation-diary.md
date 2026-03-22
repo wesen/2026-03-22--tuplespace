@@ -18,7 +18,7 @@ RelatedFiles:
       Note: Primary deliverable produced during the ticket work
 ExternalSources: []
 Summary: Chronological diary of the investigation, ticket setup, design writing, validation, and delivery work for the TupleSpace implementation ticket.
-LastUpdated: 2026-03-22T16:34:15-04:00
+LastUpdated: 2026-03-22T16:46:13-04:00
 WhatFor: Capture what was done, why it was done, what evidence shaped the design, and how the deliverables were validated and delivered.
 WhenToUse: Use when reviewing the ticket work, continuing the implementation effort, or reconstructing the design decisions and delivery steps.
 ---
@@ -816,6 +816,125 @@ use tuplespaced with glazed as well, and setup logging too
   - `POST /v1/spaces/jobs/rd` with `200`
   - `POST /v1/spaces/jobs/in` with `200`
   - final `POST /v1/spaces/jobs/rd` with `404`
+
+## Step 8: Run The Full Stack In Docker Compose And Capture A Learning Path
+
+With the compose-backed Postgres and Glazed-backed server already in place, the next step was to make the whole local stack runnable through `docker compose` rather than mixing compose for the database with host-native server execution. The practical goal was to leave behind a setup that someone can bring up in one command and then explore with a short, reliable sequence of CLI operations.
+
+The only extra complication was the repo’s local `go.mod` replace for Glazed. A normal Docker build from this repo alone would fail because the replacement target lives in a sibling checkout, so the compose service had to build from the common parent context and rewrite the replace target inside the container build.
+
+### Prompt Context
+
+**User prompt (verbatim):**
+
+```text
+ok, run both in docker compose, and then give me a set of commands for me to learn how the tool works.
+```
+
+**Assistant interpretation:** Containerize the server as well as Postgres, start the stack in Docker Compose, verify it live, and then produce a concise hands-on command sequence that demonstrates the main TupleSpace behaviors.
+
+**Inferred user intent:** Make the system easy to launch and easy to learn without requiring direct code reading or a mixed local/container workflow.
+
+**Commit (code):** `97d5c4f` — `Add full docker compose stack for tuplespace`
+
+### What I did
+
+- Added `/home/manuel/code/wesen/2026-03-22--tuplespace/Dockerfile` to build:
+  - `tuplespaced`
+  - `tuplespacectl`
+- Configured the build to:
+  - use parent context `..`,
+  - copy both `2026-03-22--tuplespace` and `corporate-headquarters/glazed`,
+  - run `go mod edit -replace github.com/go-go-golems/glazed=/src/glazed` inside the build stage.
+- Extended `/home/manuel/code/wesen/2026-03-22--tuplespace/docker-compose.yml` with a `tuplespaced` service that:
+  - builds from the new Dockerfile,
+  - waits for Postgres health,
+  - exposes the server on host port `18081`,
+  - starts with JSON logging enabled.
+- Ran:
+  - `docker compose up --build -d`
+  - `docker compose ps`
+  - `curl -sS http://127.0.0.1:18081/healthz`
+  - `docker logs --tail 30 tuplespace-server`
+- Validated the containerized CLI from inside the running server container with:
+  - `docker exec tuplespace-server tuplespacectl admin health --server-url http://127.0.0.1:8080 --output json`
+  - `docker exec tuplespace-server tuplespacectl tuple out --server-url http://127.0.0.1:8080 --space jobs --tuple-spec 'job,42,true' --output json`
+  - `docker exec tuplespace-server tuplespacectl tuple rd --server-url http://127.0.0.1:8080 --space jobs --template-spec 'job,?id:int,?ready:bool' --output json`
+  - `docker exec tuplespace-server tuplespacectl tuple in --server-url http://127.0.0.1:8080 --space jobs --template-spec 'job,?id:int,?ready:bool' --output json`
+  - `docker exec tuplespace-server tuplespacectl tuple rd --server-url http://127.0.0.1:8080 --space jobs --template-spec 'job,?id:int,?ready:bool' --output json`
+- Verified the HTTP API directly with:
+  - `curl -sS -X POST http://127.0.0.1:18081/v1/spaces/jobs/rd ...`
+- Queried live Postgres state with:
+  - `docker exec tuplespace-postgres psql -U postgres -d tuplespace -c 'select id, space, arity, fields_json from tuples order by id desc limit 5;'`
+
+### Why
+
+- A full compose stack is the lowest-friction way for another engineer to bring the system up and start learning.
+- Baking `tuplespacectl` into the same image makes it easy to teach the system from a known-good environment without depending on host-local Go builds.
+- The custom Docker build path was necessary because the repo’s current Glazed dependency is still a local checkout replacement.
+
+### What worked
+
+- `docker compose up --build -d` successfully built the image and started both services.
+- `docker compose ps` showed:
+  - `postgres` healthy on `15433`,
+  - `tuplespaced` up on `18081`.
+- `curl http://127.0.0.1:18081/healthz` returned `{"ok":true}`.
+- The sequential CLI learning path worked as expected:
+  - `out` inserted a tuple,
+  - `rd` read it non-destructively,
+  - `in` consumed it,
+  - final `rd` returned `not_found`.
+
+### What didn't work
+
+- My first attempt to demonstrate `out` and `rd` used parallel command execution and created a race where `rd` ran before `out` committed. The server logs made that obvious:
+  - `POST /v1/spaces/jobs/rd` with `404`
+  - followed immediately by `POST /v1/spaces/jobs/out` with `201`
+- Once rerun sequentially, the compose stack behaved correctly.
+
+### What I learned
+
+- The full compose workflow is viable even with the local Glazed replacement, as long as the build stage explicitly rewrites the replace target.
+- Shipping both binaries in the runtime image is a useful operator convenience because it makes compose-based tutorials and smoke checks much simpler.
+- For documentation and demos, sequential commands matter. TupleSpace semantics are correct, but a parallel demo can still confuse the reader by introducing avoidable races.
+
+### What was tricky to build
+
+- The sharp edge here was the Docker build context. The repo alone is not enough because of the sibling Glazed checkout, so the compose service had to build from the common parent directory and use a Dockerfile path inside this repo. That is slightly less elegant than a self-contained repo build, but it is honest to the current dependency layout and works reliably.
+
+### What warrants a second pair of eyes
+
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/Dockerfile`, especially the replace-target rewrite.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/docker-compose.yml`, especially if the repo layout or Glazed dependency strategy changes later.
+
+### What should be done in the future
+
+- If the Glazed dependency becomes a normal module dependency again, simplify the Docker build context back to the repo root.
+- Consider adding a dedicated `tuplespacectl` compose service if repeated one-off CLI runs become common.
+- Add a short README section with the exact learning commands captured here.
+
+### Code review instructions
+
+- Start with:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/Dockerfile`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/docker-compose.yml`
+- Validate with:
+  - `docker compose up --build -d`
+  - `docker compose ps`
+  - `curl -sS http://127.0.0.1:18081/healthz`
+  - `docker exec tuplespace-server tuplespacectl admin health --server-url http://127.0.0.1:8080 --output json`
+
+### Technical details
+
+- Running compose stack at the end of this step:
+  - `tuplespace-postgres` on host `15433`
+  - `tuplespace-server` on host `18081`
+- Example sequential learning path:
+  - `docker exec tuplespace-server tuplespacectl tuple out --server-url http://127.0.0.1:8080 --space jobs --tuple-spec 'job,42,true' --output json`
+  - `docker exec tuplespace-server tuplespacectl tuple rd --server-url http://127.0.0.1:8080 --space jobs --template-spec 'job,?id:int,?ready:bool' --output json`
+  - `docker exec tuplespace-server tuplespacectl tuple in --server-url http://127.0.0.1:8080 --space jobs --template-spec 'job,?id:int,?ready:bool' --output json`
+  - `docker exec tuplespace-server tuplespacectl tuple rd --server-url http://127.0.0.1:8080 --space jobs --template-spec 'job,?id:int,?ready:bool' --output json`
 
 ## Context
 
