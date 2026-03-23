@@ -10,8 +10,18 @@ DocType: reference
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: cmd/tuplespacectl/cmds/admin/export.go
+      Note: Diary tracks the export command
+    - Path: cmd/tuplespacectl/cmds/admin/helpers.go
+      Note: Diary tracks shared CLI filter/row helper reuse
+    - Path: cmd/tuplespacectl/cmds/admin/peek.go
+      Note: Diary tracks the filtered peek command
     - Path: cmd/tuplespacectl/cmds/admin/stats.go
       Note: Diary tracks the first end-user admin read-only commands
+    - Path: cmd/tuplespacectl/cmds/admin/tuple/delete.go
+      Note: Diary tracks tuple delete command work
+    - Path: cmd/tuplespacectl/cmds/admin/tuple/get.go
+      Note: Diary tracks tuple lookup command work
     - Path: cmd/tuplespacectl/main_test.go
       Note: |-
         Diary will record built-binary admin command validation
@@ -30,6 +40,7 @@ LastUpdated: 2026-03-22T21:46:19.191532652-04:00
 WhatFor: ""
 WhenToUse: ""
 ---
+
 
 
 
@@ -273,6 +284,104 @@ I deliberately implemented more backend infrastructure than the first CLI comman
   - `GET /v1/admin/config`
   - `GET /v1/admin/schema`
   - `GET /v1/admin/waiters`
+
+## Step 3: Add Tuple-Targeted Lookup/Delete And Filtered Peek/Export Commands
+
+This step turned the already-implemented admin backend methods into more specific operator commands. The main additions were nested tuple-admin commands for lookup and deletion by internal id, plus `peek` and `export` commands that reuse the same filtered tuple listing surface as `dump`.
+
+The implementation was intentionally light on backend changes because the previous slice already added the required HTTP routes and client methods. The main work here was command ergonomics and real end-to-end validation. I chose to look up tuple ids directly from the test database in the built-binary test rather than teaching `tuple out` to print ids, because that kept this slice focused on the admin surface instead of widening the normal tuple API contract.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 1)
+
+**Assistant interpretation:** Continue the admin ticket by implementing the next commands in the planned sequence, with the same commit-and-diary discipline.
+
+**Inferred user intent:** Build out the remaining admin command set methodically until the ticket is complete.
+
+**Commit (code):** ff516b7 — "Add tuple-targeted admin commands"
+
+### What I did
+
+- Added shared CLI helpers in:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/helpers.go`
+- Refactored `dump` to use the shared tuple-filter and tuple-row helpers.
+- Added:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/peek.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/export.go`
+- Added a nested admin tuple group:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/tuple/root.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/tuple/get.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/tuple/delete.go`
+- Updated the admin root command to register:
+  - `peek`
+  - `export`
+  - nested `tuple` subcommands.
+- Extended the built-binary CLI suite in:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`
+- Ran:
+  - `go test ./cmd/tuplespacectl -count=1`
+  - `go test ./... -count=1`
+
+### Why
+
+- `peek` and `export` are both filtered tuple-listing workflows and fit naturally beside `dump`.
+- `admin tuple get` and `admin tuple delete` are the smallest precise maintenance tools, so they should exist before broader destructive commands like `purge`.
+- Reusing the shared filter/row helpers keeps command behavior aligned and reduces the chance that `dump`, `peek`, and `export` drift in subtle ways.
+
+### What worked
+
+- The nested `admin tuple get` and `admin tuple delete` paths worked through the real server and built CLI binaries.
+- `peek` and `export` produced the expected filtered tuple rows.
+- Deleting a tuple by id through the CLI made subsequent `admin tuple get` fail with the expected `not_found` error.
+- The full repository suite stayed green after the command-tree expansion.
+
+### What didn't work
+
+- N/A. This slice went through without needing a corrective code patch after the first compile/test pass.
+
+### What I learned
+
+- The admin CLI surface benefits from having a more explicit hierarchy than the tuple data-plane commands. `admin tuple get` and `admin tuple delete` read much more clearly than flattening those into standalone top-level verbs.
+- The existing backend abstraction added in Step 2 was broad enough that this slice could mostly stay in the CLI layer, which validated the earlier decision to build shared admin contracts first.
+
+### What was tricky to build
+
+- The only notable tradeoff was how to obtain tuple ids in the end-to-end CLI test. The cleanest way to validate `admin tuple get/delete` without changing unrelated APIs was to query the test database directly for ids after creating tuples through the normal CLI path. That kept the behavioral surface stable while still testing the real admin transport.
+
+### What warrants a second pair of eyes
+
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/helpers.go`, especially the shared filter parsing and tuple-row emission.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/root.go`, especially the nested command registration.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`, especially the tuple-id lookup and delete-follow-up assertions.
+
+### What should be done in the future
+
+- Add the remaining CLI commands:
+  - `admin purge`
+  - `admin notify-test`
+- Add stronger test coverage for destructive admin operations beyond single-id deletion.
+
+### Code review instructions
+
+- Start with:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/helpers.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/peek.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/export.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/tuple/`
+- Then review:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`
+- Validate with:
+  - `go test ./cmd/tuplespacectl -count=1`
+  - `go test ./... -count=1`
+
+### Technical details
+
+- New end-user commands in this slice:
+  - `tuplespacectl admin peek --space jobs`
+  - `tuplespacectl admin export --space jobs`
+  - `tuplespacectl admin tuple get --tuple-id 123`
+  - `tuplespacectl admin tuple delete --tuple-id 123`
 
 ## Usage Examples
 

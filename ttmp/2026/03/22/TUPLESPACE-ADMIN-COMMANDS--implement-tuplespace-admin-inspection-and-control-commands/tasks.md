@@ -30,10 +30,10 @@
   - `admin stats`
   - `admin config`
   - `admin schema`
-- [ ] Implement the tuple-targeted admin CLI commands:
+- [x] Implement the tuple-targeted admin CLI commands:
   - `admin tuple get`
   - `admin tuple delete`
-- [ ] Implement the filtered inspection/export CLI commands:
+- [x] Implement the filtered inspection/export CLI commands:
   - `admin peek`
   - `admin export`
 - [ ] Implement the mutating/control CLI commands:

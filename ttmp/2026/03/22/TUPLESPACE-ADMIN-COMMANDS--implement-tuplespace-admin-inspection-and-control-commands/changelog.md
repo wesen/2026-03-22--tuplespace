@@ -26,3 +26,16 @@ Added the shared admin backend plus the first end-to-end read-only admin CLI com
 - /home/manuel/code/wesen/2026-03-22--tuplespace/internal/store/admin_store.go — Added tuple listing, counting, lookup, and purge-capable store queries
 - /home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/router.go — Added `/v1/admin/...` route handling
 - /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/dump.go — Added one of the new user-facing read-only admin commands
+
+
+## 2026-03-22
+
+Added tuple-targeted admin commands plus filtered `peek` and `export`, and validated them through the real built-binary CLI path (commit ff516b7)
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/helpers.go — Shared tuple filter parsing and tuple-row emission introduced for dump/peek/export
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/peek.go — Added filtered tuple inspection without deletion
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/export.go — Added export-oriented filtered tuple listing
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/tuple/get.go — Added tuple lookup by internal tuple id
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/tuple/delete.go — Added tuple deletion by internal tuple id

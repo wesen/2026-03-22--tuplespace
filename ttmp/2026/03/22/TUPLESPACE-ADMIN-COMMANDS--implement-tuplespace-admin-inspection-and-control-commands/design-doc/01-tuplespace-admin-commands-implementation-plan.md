@@ -12,8 +12,14 @@ Owners: []
 RelatedFiles:
     - Path: cmd/tuplespacectl/cmds/admin/dump.go
       Note: Represents the first user-facing read-only admin command built from the plan
+    - Path: cmd/tuplespacectl/cmds/admin/helpers.go
+      Note: Shared CLI helpers now realize the plan for dump/peek/export consistency
     - Path: cmd/tuplespacectl/cmds/admin/root.go
       Note: CLI admin group will host the new commands
+    - Path: cmd/tuplespacectl/cmds/admin/tuple/delete.go
+      Note: Implements the planned tuple-id delete command
+    - Path: cmd/tuplespacectl/cmds/admin/tuple/get.go
+      Note: Implements the planned tuple-id lookup command
     - Path: internal/admin/models.go
       Note: Shared admin contracts introduced in the first implementation slice
     - Path: internal/api/httpapi/router.go
@@ -32,6 +38,7 @@ LastUpdated: 2026-03-22T21:46:19.189552802-04:00
 WhatFor: ""
 WhenToUse: ""
 ---
+
 
 
 
