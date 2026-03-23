@@ -87,3 +87,25 @@ func TestServiceNotifyTestReportsSubscribers(t *testing.T) {
 	}}))
 	require.NoError(t, <-done)
 }
+
+func TestServiceDeleteTupleByID(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	require.NoError(t, svc.Out(ctx, "jobs", types.Tuple{Fields: []types.TupleField{
+		{Type: types.TypeString, Value: "job"},
+	}}))
+
+	tuples, err := svc.Dump(ctx, admin.TupleFilter{Space: "jobs"})
+	require.NoError(t, err)
+	require.Len(t, tuples, 1)
+
+	result, err := svc.DeleteTuple(ctx, tuples[0].ID)
+	require.NoError(t, err)
+	require.True(t, result.Deleted)
+	require.Equal(t, tuples[0].ID, result.TupleID)
+
+	_, found, err := svc.GetTuple(ctx, tuples[0].ID)
+	require.NoError(t, err)
+	require.False(t, found)
+}
