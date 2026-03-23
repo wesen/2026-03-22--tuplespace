@@ -14,6 +14,10 @@ RelatedFiles:
       Note: Represents the first user-facing read-only admin command built from the plan
     - Path: cmd/tuplespacectl/cmds/admin/helpers.go
       Note: Shared CLI helpers now realize the plan for dump/peek/export consistency
+    - Path: cmd/tuplespacectl/cmds/admin/notifytest.go
+      Note: Implements the planned notifier diagnostic command
+    - Path: cmd/tuplespacectl/cmds/admin/purge.go
+      Note: Implements the planned destructive purge command
     - Path: cmd/tuplespacectl/cmds/admin/root.go
       Note: CLI admin group will host the new commands
     - Path: cmd/tuplespacectl/cmds/admin/tuple/delete.go
@@ -38,6 +42,7 @@ LastUpdated: 2026-03-22T21:46:19.189552802-04:00
 WhatFor: ""
 WhenToUse: ""
 ---
+
 
 
 

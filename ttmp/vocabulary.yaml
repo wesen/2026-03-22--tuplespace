@@ -5,6 +5,10 @@ topics:
       description: Backend services
     - slug: websocket
       description: WebSocket lifecycle & events
+    - slug: cli
+      description: Command-line interface and tooling work
+    - slug: tuplespace
+      description: TupleSpace service, storage, and operator tooling
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes

@@ -39,3 +39,34 @@ Added tuple-targeted admin commands plus filtered `peek` and `export`, and valid
 - /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/export.go — Added export-oriented filtered tuple listing
 - /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/tuple/get.go — Added tuple lookup by internal tuple id
 - /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/tuple/delete.go — Added tuple deletion by internal tuple id
+
+
+## 2026-03-22
+
+Added the remaining destructive and notifier-oriented admin commands, enforced purge confirmation in the HTTP contract, and validated the notifier path with a real blocked reader (commit 552cf97)
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/purge.go — Added the destructive purge command with explicit confirmation flag
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/notifytest.go — Added operator-facing notifier diagnostics
+- /home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/admin_handlers.go — Enforced purge confirmation server-side
+- /home/manuel/code/wesen/2026-03-22--tuplespace/internal/client/admin.go — Propagated the purge confirmation flag through the client transport
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go — Added built-binary coverage for purge confirmation and notify-test against a real blocked reader
+
+
+## 2026-03-22
+
+Added direct service-level delete-by-id coverage to close the remaining admin test-gap and reran the full repository suite (commit 6ddaa91)
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-03-22--tuplespace/internal/service/admin_test.go — Added the final direct service test for tuple deletion
+
+
+## 2026-03-22
+
+Added the missing ticket vocabulary entries and reran `docmgr doctor` until the admin ticket passed all checks
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-03-22--tuplespace/ttmp/vocabulary.yaml — Added the `cli` and `tuplespace` topic entries needed by the new ticket

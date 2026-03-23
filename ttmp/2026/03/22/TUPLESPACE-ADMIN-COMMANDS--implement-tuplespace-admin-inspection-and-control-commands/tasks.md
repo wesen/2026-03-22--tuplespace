@@ -36,13 +36,13 @@
 - [x] Implement the filtered inspection/export CLI commands:
   - `admin peek`
   - `admin export`
-- [ ] Implement the mutating/control CLI commands:
+- [x] Implement the mutating/control CLI commands:
   - `admin purge`
   - `admin waiters`
   - `admin notify-test`
 - [x] Add HTTP handler tests for the new admin endpoints.
-- [ ] Add store and service tests for admin queries, tuple deletion, purge filters, notifier testing, and waiter introspection.
-- [ ] Add built-binary CLI tests covering the new admin commands against the real server path.
-- [ ] Run full verification with targeted package tests and `go test ./... -count=1`.
-- [ ] Update the ticket changelog and diary after each implementation slice with exact commit hashes and validation evidence.
+- [x] Add store and service tests for admin queries, tuple deletion, purge filters, notifier testing, and waiter introspection.
+- [x] Add built-binary CLI tests covering the new admin commands against the real server path.
+- [x] Run full verification with targeted package tests and `go test ./... -count=1`.
+- [x] Update the ticket changelog and diary after each implementation slice with exact commit hashes and validation evidence.
 - [ ] Close the ticket after implementation work is completed and reviewed.

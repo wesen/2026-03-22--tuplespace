@@ -14,8 +14,12 @@ RelatedFiles:
       Note: Diary tracks the export command
     - Path: cmd/tuplespacectl/cmds/admin/helpers.go
       Note: Diary tracks shared CLI filter/row helper reuse
+    - Path: cmd/tuplespacectl/cmds/admin/notifytest.go
+      Note: Diary tracks the notifier test command
     - Path: cmd/tuplespacectl/cmds/admin/peek.go
       Note: Diary tracks the filtered peek command
+    - Path: cmd/tuplespacectl/cmds/admin/purge.go
+      Note: Diary tracks the final destructive admin command
     - Path: cmd/tuplespacectl/cmds/admin/stats.go
       Note: Diary tracks the first end-user admin read-only commands
     - Path: cmd/tuplespacectl/cmds/admin/tuple/delete.go
@@ -32,6 +36,8 @@ RelatedFiles:
       Note: Diary tracks notifier snapshot and test notification changes
     - Path: internal/service/admin.go
       Note: Diary records runtime snapshot and waiter instrumentation work
+    - Path: internal/service/admin_test.go
+      Note: Diary records the final direct service delete-by-id coverage
     - Path: internal/service/service.go
       Note: Diary tracks service instrumentation and waiter lifecycle work
 ExternalSources: []
@@ -40,6 +46,7 @@ LastUpdated: 2026-03-22T21:46:19.191532652-04:00
 WhatFor: ""
 WhenToUse: ""
 ---
+
 
 
 
@@ -382,6 +389,247 @@ The implementation was intentionally light on backend changes because the previo
   - `tuplespacectl admin export --space jobs`
   - `tuplespacectl admin tuple get --tuple-id 123`
   - `tuplespacectl admin tuple delete --tuple-id 123`
+
+## Step 4: Add Purge And Notify-Test To Complete The Admin CLI Surface
+
+This step completed the remaining user-facing admin proposal items. `purge` introduced the only intentionally broad destructive operation in the admin surface, so I added a confirmation requirement in the HTTP contract itself instead of trusting the CLI alone. `notify-test` completed the runtime diagnostics side by exposing an operator-facing way to trigger a wakeup on a space channel and inspect the notifier snapshot at the same time.
+
+The CLI test for `notify-test` deliberately exercised the real runtime behavior rather than just calling the endpoint in isolation. I started a real blocking `rd` command, waited for the admin `waiters` surface to show it, triggered `notify-test`, verified that the notifier reported one subscriber on the expected channel, and then inserted a tuple so the blocked reader could finish successfully. That kept the final feature honest.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 1)
+
+**Assistant interpretation:** Finish the remaining admin commands and keep the same testing and diary standards through the end of the ticket.
+
+**Inferred user intent:** Reach a genuinely complete implementation of the proposed admin surface, not just a partial command set.
+
+**Commit (code):** 552cf97 — "Add destructive admin control commands"
+
+### What I did
+
+- Added CLI commands:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/purge.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/notifytest.go`
+- Updated the admin root command to register them.
+- Added a confirmation field to the purge HTTP request contract in:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/admin_types.go`
+- Enforced purge confirmation in:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/admin_handlers.go`
+- Tightened validation error handling by exporting:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/validation/errors.go`
+- Switched service-side admin validation failures such as invalid tuple ids and invalid filters to use validation errors rather than generic internal errors.
+- Updated the client purge helper to send the explicit confirmation flag.
+- Added notifier-focused service coverage in:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/service/admin_test.go`
+- Extended the built-binary CLI suite in:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`
+- Ran:
+  - `go test ./cmd/tuplespacectl ./internal/service -count=1`
+  - `go test ./... -count=1`
+
+### Why
+
+- `purge` is powerful enough that it needed a safety guard at the server boundary, not only in the UX layer.
+- `notify-test` is only meaningful if it reports something real about the current notifier state, so the command returns both the channel and subscriber counts.
+- Exporting a validation constructor was the cleanest way to keep admin misuse in the 400-series error path.
+
+### What worked
+
+- `admin purge` now refuses to run without `--confirm`.
+- `admin purge --confirm --space jobs` deleted the expected tuples in the built-binary integration test while leaving other spaces untouched.
+- `admin notify-test` reported the live subscriber/channel counts while a real blocked reader was present.
+- The blocking reader resumed normally once a matching tuple was written after the notifier test.
+
+### What didn't work
+
+- The first version of the final CLI integration test used the `testing.T`-based `runCLI(...)` helper inside a goroutine.
+- That helper is fine on the main test goroutine, but it is the wrong abstraction for asynchronous command execution. I replaced that path with `runCLIResult(...)`, which returns `(string, error)` without invoking `require` inside the goroutine.
+- I also initially named the new notify command source file `notify_test.go`, which would have been treated as a Go test file rather than production code. I renamed it to `notifytest.go` before rerunning the suite.
+
+### What I learned
+
+- Destructive-command safety is cleaner when the transport contract carries the intent explicitly. A `confirm` flag in the request body makes the server behavior unambiguous even if someone bypasses the CLI.
+- The notifier diagnostics become much more trustworthy when tested against a real blocked reader rather than only mocked counters.
+
+### What was tricky to build
+
+- The tricky part was making `notify-test` prove something real. A notification with zero subscribers would still exercise the endpoint, but it would not validate the operator workflow. The final test had to coordinate a blocked reader, waiter visibility, a notify-test call, and then a tuple write to finish the blocked operation.
+
+### What warrants a second pair of eyes
+
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/admin_handlers.go`, especially the purge confirmation branch.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/client/admin.go`, especially the confirmation flag plumbing.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`, especially the blocking-reader coordination in the notify-test path.
+
+### What should be done in the future
+
+- If the admin API ever becomes remotely exposed, add authentication/authorization before relying on these controls outside local/trusted environments.
+
+### Code review instructions
+
+- Start with:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/purge.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/notifytest.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/admin_handlers.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/client/admin.go`
+- Then review:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/service/admin_test.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`
+- Validate with:
+  - `go test ./cmd/tuplespacectl ./internal/service -count=1`
+  - `go test ./... -count=1`
+
+### Technical details
+
+- New end-user commands in this slice:
+  - `tuplespacectl admin purge --space jobs --confirm`
+  - `tuplespacectl admin notify-test --space jobs`
+- Purge now requires the request contract to include:
+  - `{"filter": {...}, "confirm": true}`
+
+## Step 5: Add Direct Service Coverage For Delete-By-ID And Re-Run The Full Suite
+
+After the final command slice was in place, I noticed one remaining test bookkeeping gap in the task list: tuple deletion was covered through the built-binary CLI path, but not directly through a service-layer test. I added a focused service test so the ticket’s “store and service tests” claim could be true in a narrow, literal sense instead of hand-wavy.
+
+This was a small change, but it mattered because it turned the final task list into an accurate statement of coverage. Once that test passed, I reran the full repository suite to make sure the ticket ended on a clean verification point.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 1)
+
+**Assistant interpretation:** Finish the admin ticket rigorously enough that the implementation diary and task list remain technically honest.
+
+**Inferred user intent:** Leave behind a result that is complete and reviewable, not just feature-complete in a loose sense.
+
+**Commit (code):** 6ddaa91 — "Add service coverage for tuple deletion"
+
+### What I did
+
+- Added a direct service test for delete-by-id in:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/service/admin_test.go`
+- Re-ran:
+  - `go test ./internal/service -count=1`
+  - `go test ./... -count=1`
+
+### Why
+
+- The task list explicitly called out store/service coverage for tuple deletion, so a direct service test was the right finishing move.
+
+### What worked
+
+- The new service test proved that:
+  - a tuple can be located,
+  - deleted by id,
+  - and then observed as missing through the same service surface.
+- The full repository suite remained green afterward.
+
+### What didn't work
+
+- N/A.
+
+### What I learned
+
+- A small explicit test can be worth adding late if it closes a real documentation/coverage gap cleanly.
+
+### What was tricky to build
+
+- Nothing technically difficult; the main point was discipline rather than complexity.
+
+### What warrants a second pair of eyes
+
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/service/admin_test.go`, especially the final delete-by-id coverage.
+
+### What should be done in the future
+
+- Close the ticket after review.
+
+### Code review instructions
+
+- Review:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/service/admin_test.go`
+- Validate with:
+  - `go test ./internal/service -count=1`
+  - `go test ./... -count=1`
+
+### Technical details
+
+- The new service test uses:
+  - `svc.Dump(...)`
+  - `svc.DeleteTuple(...)`
+  - `svc.GetTuple(...)`
+- This makes the delete-by-id path directly visible in the service layer without going through the CLI.
+
+## Step 6: Validate The Ticket Metadata And Vocabulary
+
+The implementation was complete at this point, but the ticket still needed a clean `docmgr doctor` run to count as properly closed out. The only issue that surfaced was documentation hygiene rather than code: the project vocabulary did not yet contain the `cli` and `tuplespace` topic slugs used by this new ticket.
+
+I added those vocabulary entries and reran the doctor command until it reported a clean pass. That left the ticket in a consistent state: code complete, tests green, and documentation validated.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 1)
+
+**Assistant interpretation:** Finish the admin ticket with the same rigor applied to the code, including the documentation and validation trail.
+
+**Inferred user intent:** Leave behind a ticket that is both implemented and well-maintained.
+
+### What I did
+
+- Ran:
+  - `docmgr doctor --ticket TUPLESPACE-ADMIN-COMMANDS --stale-after 30`
+- Observed the warning about unknown topic slugs:
+  - `cli`
+  - `tuplespace`
+- Added both vocabulary entries:
+  - `docmgr vocab add --category topics --slug cli --description "Command-line interface and tooling work"`
+  - `docmgr vocab add --category topics --slug tuplespace --description "TupleSpace service, storage, and operator tooling"`
+- Re-ran:
+  - `docmgr doctor --ticket TUPLESPACE-ADMIN-COMMANDS --stale-after 30`
+
+### Why
+
+- A clean docmgr report is part of the ticket hygiene expected for this workflow.
+
+### What worked
+
+- The vocabulary update removed the only doctor warning.
+- The final `docmgr doctor` run reported:
+  - `✅ All checks passed`
+
+### What didn't work
+
+- The first doctor run warned that the new ticket topics were not present in the current vocabulary.
+
+### What I learned
+
+- Ticket topics are easy to treat as incidental, but they are part of the maintained knowledge model and should be validated like code-facing metadata.
+
+### What was tricky to build
+
+- Nothing technically tricky here; the main requirement was remembering to finish the documentation loop, not just the implementation loop.
+
+### What warrants a second pair of eyes
+
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/ttmp/vocabulary.yaml`, especially the added topic entries.
+
+### What should be done in the future
+
+- Close the ticket after review.
+
+### Code review instructions
+
+- Review:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/ttmp/vocabulary.yaml`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/ttmp/2026/03/22/TUPLESPACE-ADMIN-COMMANDS--implement-tuplespace-admin-inspection-and-control-commands/`
+- Validate with:
+  - `docmgr doctor --ticket TUPLESPACE-ADMIN-COMMANDS --stale-after 30`
+
+### Technical details
+
+- Added vocabulary topics:
+  - `cli`
+  - `tuplespace`
 
 ## Usage Examples
 
