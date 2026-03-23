@@ -14,11 +14,11 @@ import (
 	"github.com/manuel/wesen/tuplespace/internal/client"
 )
 
-type DumpCommand struct {
+type ExportCommand struct {
 	*cmds.CommandDescription
 }
 
-type DumpSettings struct {
+type ExportSettings struct {
 	ServerURL     string `glazed:"server-url"`
 	Space         string `glazed:"space"`
 	Limit         int    `glazed:"limit"`
@@ -27,18 +27,18 @@ type DumpSettings struct {
 	CreatedAfter  string `glazed:"created-after"`
 }
 
-func NewDumpCommand() (*cobra.Command, error) {
-	command, err := newDumpCommand()
+func NewExportCommand() (*cobra.Command, error) {
+	command, err := newExportCommand()
 	if err != nil {
 		return nil, err
 	}
 	return cmdshared.BuildCobraCommand(command)
 }
 
-func newDumpCommand() (*DumpCommand, error) {
+func newExportCommand() (*ExportCommand, error) {
 	desc := cmds.NewCommandDescription(
-		"dump",
-		cmds.WithShort("Dump tuples from one space or all spaces"),
+		"export",
+		cmds.WithShort("Export tuples with admin filters"),
 		cmds.WithFlags(
 			fields.New("server-url", fields.TypeString, fields.WithDefault("http://127.0.0.1:8080"), fields.WithHelp("TupleSpace server base URL")),
 			fields.New("space", fields.TypeString, fields.WithHelp("Optional space filter")),
@@ -48,11 +48,11 @@ func newDumpCommand() (*DumpCommand, error) {
 			fields.New("created-after", fields.TypeString, fields.WithHelp("Only include tuples created after this RFC3339 timestamp")),
 		),
 	)
-	return &DumpCommand{CommandDescription: desc}, nil
+	return &ExportCommand{CommandDescription: desc}, nil
 }
 
-func (c *DumpCommand) RunIntoGlazeProcessor(ctx context.Context, vals *values.Values, gp middlewares.Processor) error {
-	settings := &DumpSettings{}
+func (c *ExportCommand) RunIntoGlazeProcessor(ctx context.Context, vals *values.Values, gp middlewares.Processor) error {
+	settings := &ExportSettings{}
 	if err := vals.DecodeSectionInto(schema.DefaultSlug, settings); err != nil {
 		return err
 	}
@@ -61,8 +61,7 @@ func (c *DumpCommand) RunIntoGlazeProcessor(ctx context.Context, vals *values.Va
 	if err != nil {
 		return err
 	}
-
-	tuples, err := client.New(settings.ServerURL).Dump(ctx, filter)
+	tuples, err := client.New(settings.ServerURL).Export(ctx, filter)
 	if err != nil {
 		return err
 	}

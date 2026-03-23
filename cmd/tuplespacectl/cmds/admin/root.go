@@ -1,6 +1,10 @@
 package admin
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
+
+	adminTuple "github.com/manuel/wesen/tuplespace/cmd/tuplespacectl/cmds/admin/tuple"
+)
 
 func NewCommand() (*cobra.Command, error) {
 	root := &cobra.Command{
@@ -20,6 +24,14 @@ func NewCommand() (*cobra.Command, error) {
 	if err != nil {
 		return nil, err
 	}
+	peekCmd, err := NewPeekCommand()
+	if err != nil {
+		return nil, err
+	}
+	exportCmd, err := NewExportCommand()
+	if err != nil {
+		return nil, err
+	}
 	statsCmd, err := NewStatsCommand()
 	if err != nil {
 		return nil, err
@@ -36,6 +48,10 @@ func NewCommand() (*cobra.Command, error) {
 	if err != nil {
 		return nil, err
 	}
-	root.AddCommand(healthCmd, spacesCmd, dumpCmd, statsCmd, configCmd, schemaCmd, waitersCmd)
+	tupleCmd, err := adminTuple.NewCommand()
+	if err != nil {
+		return nil, err
+	}
+	root.AddCommand(healthCmd, spacesCmd, dumpCmd, peekCmd, exportCmd, statsCmd, configCmd, schemaCmd, waitersCmd, tupleCmd)
 	return root, nil
 }

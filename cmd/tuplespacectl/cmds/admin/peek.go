@@ -14,11 +14,11 @@ import (
 	"github.com/manuel/wesen/tuplespace/internal/client"
 )
 
-type DumpCommand struct {
+type PeekCommand struct {
 	*cmds.CommandDescription
 }
 
-type DumpSettings struct {
+type PeekSettings struct {
 	ServerURL     string `glazed:"server-url"`
 	Space         string `glazed:"space"`
 	Limit         int    `glazed:"limit"`
@@ -27,18 +27,18 @@ type DumpSettings struct {
 	CreatedAfter  string `glazed:"created-after"`
 }
 
-func NewDumpCommand() (*cobra.Command, error) {
-	command, err := newDumpCommand()
+func NewPeekCommand() (*cobra.Command, error) {
+	command, err := newPeekCommand()
 	if err != nil {
 		return nil, err
 	}
 	return cmdshared.BuildCobraCommand(command)
 }
 
-func newDumpCommand() (*DumpCommand, error) {
+func newPeekCommand() (*PeekCommand, error) {
 	desc := cmds.NewCommandDescription(
-		"dump",
-		cmds.WithShort("Dump tuples from one space or all spaces"),
+		"peek",
+		cmds.WithShort("List tuples with admin filters without consuming them"),
 		cmds.WithFlags(
 			fields.New("server-url", fields.TypeString, fields.WithDefault("http://127.0.0.1:8080"), fields.WithHelp("TupleSpace server base URL")),
 			fields.New("space", fields.TypeString, fields.WithHelp("Optional space filter")),
@@ -48,11 +48,11 @@ func newDumpCommand() (*DumpCommand, error) {
 			fields.New("created-after", fields.TypeString, fields.WithHelp("Only include tuples created after this RFC3339 timestamp")),
 		),
 	)
-	return &DumpCommand{CommandDescription: desc}, nil
+	return &PeekCommand{CommandDescription: desc}, nil
 }
 
-func (c *DumpCommand) RunIntoGlazeProcessor(ctx context.Context, vals *values.Values, gp middlewares.Processor) error {
-	settings := &DumpSettings{}
+func (c *PeekCommand) RunIntoGlazeProcessor(ctx context.Context, vals *values.Values, gp middlewares.Processor) error {
+	settings := &PeekSettings{}
 	if err := vals.DecodeSectionInto(schema.DefaultSlug, settings); err != nil {
 		return err
 	}
@@ -61,8 +61,7 @@ func (c *DumpCommand) RunIntoGlazeProcessor(ctx context.Context, vals *values.Va
 	if err != nil {
 		return err
 	}
-
-	tuples, err := client.New(settings.ServerURL).Dump(ctx, filter)
+	tuples, err := client.New(settings.ServerURL).Peek(ctx, filter)
 	if err != nil {
 		return err
 	}

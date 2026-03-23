@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	testpostgres "github.com/manuel/wesen/tuplespace/internal/testutil/postgres"
@@ -164,6 +165,39 @@ func TestCLIAdminReadOnlyCommands(t *testing.T) {
 	require.Contains(t, schema, `"tuples_space_arity_id_idx"`)
 }
 
+func TestCLIAdminTupleAndFilteredCommands(t *testing.T) {
+	db := testpostgres.Start(t)
+	serverBin := buildBinary(t, "tuplespaced", "./cmd/tuplespaced")
+	cliBin := buildBinary(t, "tuplespacectl", "./cmd/tuplespacectl")
+	serverURL, stop := startServerProcess(t, serverBin, db.URL)
+	defer stop()
+
+	runCLI(t, cliBin, serverURL, "tuple", "out", "--space", "jobs", "--output", "json", `job,1,true`, `job,2,false`)
+	runCLI(t, cliBin, serverURL, "tuple", "out", "--space", "workers", "--output", "json", `worker,3,true`)
+
+	jobTupleID := lookupTupleID(t, db.Pool, "jobs")
+	workerTupleID := lookupTupleID(t, db.Pool, "workers")
+
+	getOutput := runCLI(t, cliBin, serverURL, "admin", "tuple", "get", "--tuple-id", fmt.Sprintf("%d", jobTupleID), "--output", "json")
+	require.Contains(t, getOutput, fmt.Sprintf(`"id": %d`, jobTupleID))
+	require.Contains(t, getOutput, `"space": "jobs"`)
+
+	peekOutput := runCLI(t, cliBin, serverURL, "admin", "peek", "--space", "workers", "--output", "json")
+	require.Contains(t, peekOutput, `"space": "workers"`)
+	require.Contains(t, peekOutput, `"worker"`)
+
+	exportOutput := runCLI(t, cliBin, serverURL, "admin", "export", "--space", "jobs", "--output", "json")
+	require.Contains(t, exportOutput, `"space": "jobs"`)
+	require.Contains(t, exportOutput, `"job"`)
+
+	deleteOutput := runCLI(t, cliBin, serverURL, "admin", "tuple", "delete", "--tuple-id", fmt.Sprintf("%d", workerTupleID), "--output", "json")
+	require.Contains(t, deleteOutput, fmt.Sprintf(`"tuple_id": %d`, workerTupleID))
+	require.Contains(t, deleteOutput, `"deleted": true`)
+
+	missing := runCLIExpectError(t, cliBin, serverURL, "admin", "tuple", "get", "--tuple-id", fmt.Sprintf("%d", workerTupleID), "--output", "json")
+	require.Contains(t, missing, "Error: not_found: tuple not found")
+}
+
 func startServerProcess(t *testing.T, serverBin string, databaseURL string) (string, func()) {
 	t.Helper()
 
@@ -279,4 +313,13 @@ func runCLIWithEnv(t *testing.T, cliBin string, env []string, args ...string) st
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 	return string(output)
+}
+
+func lookupTupleID(t *testing.T, pool *pgxpool.Pool, space string) int64 {
+	t.Helper()
+
+	var tupleID int64
+	err := pool.QueryRow(context.Background(), `SELECT id FROM tuples WHERE space = $1 ORDER BY id LIMIT 1`, space).Scan(&tupleID)
+	require.NoError(t, err)
+	return tupleID
 }
