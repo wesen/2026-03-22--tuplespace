@@ -66,6 +66,32 @@ func TestLoadTupleInputsRejectsMixedSources(t *testing.T) {
 	require.EqualError(t, err, "provide exactly one tuple input source: tuple-file, tuple-spec, or tuple-spec arguments")
 }
 
+func TestLoadTemplateInputsParsesMultipleTemplateSpecs(t *testing.T) {
+	templates, err := LoadTemplateInputs("", "", []string{`job,?id:int,?ready:bool`, `"worker",?id:int,false`})
+	require.NoError(t, err)
+	require.Equal(t, []types.Template{
+		{
+			Fields: []types.TemplateField{
+				{Kind: types.FieldActual, Type: types.TypeString, Value: "job"},
+				{Kind: types.FieldFormal, Type: types.TypeInt, Name: "id"},
+				{Kind: types.FieldFormal, Type: types.TypeBool, Name: "ready"},
+			},
+		},
+		{
+			Fields: []types.TemplateField{
+				{Kind: types.FieldActual, Type: types.TypeString, Value: "worker"},
+				{Kind: types.FieldFormal, Type: types.TypeInt, Name: "id"},
+				{Kind: types.FieldActual, Type: types.TypeBool, Value: false},
+			},
+		},
+	}, templates)
+}
+
+func TestLoadTemplateInputsRejectsMixedSources(t *testing.T) {
+	_, err := LoadTemplateInputs("", `job,?id:int`, []string{`worker,?id:int`})
+	require.EqualError(t, err, "provide exactly one template input source: template-json-file, template-spec, or template-spec arguments")
+}
+
 func TestParseTemplateSpecRejectsMalformedFormalField(t *testing.T) {
 	_, err := ParseTemplateSpec(`job,?id`)
 	require.EqualError(t, err, `parse template field 1: formal field "?id" must use ?name:type`)

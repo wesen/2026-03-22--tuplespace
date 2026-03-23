@@ -132,6 +132,49 @@ func LoadTemplateInput(path string, spec string) (types.Template, error) {
 	}
 }
 
+func LoadTemplateInputs(path string, spec string, specs []string) ([]types.Template, error) {
+	sources := 0
+	if path != "" {
+		sources++
+	}
+	if spec != "" {
+		sources++
+	}
+	if len(specs) > 0 {
+		sources++
+	}
+	if sources > 1 {
+		return nil, fmt.Errorf("provide exactly one template input source: template-json-file, template-spec, or template-spec arguments")
+	}
+
+	switch {
+	case path != "":
+		template, err := LoadTemplate(path)
+		if err != nil {
+			return nil, err
+		}
+		return []types.Template{template}, nil
+	case spec != "":
+		template, err := ParseTemplateSpec(spec)
+		if err != nil {
+			return nil, err
+		}
+		return []types.Template{template}, nil
+	case len(specs) > 0:
+		templates := make([]types.Template, len(specs))
+		for i, templateSpec := range specs {
+			template, err := ParseTemplateSpec(templateSpec)
+			if err != nil {
+				return nil, fmt.Errorf("parse template-spec argument %d: %w", i, err)
+			}
+			templates[i] = template
+		}
+		return templates, nil
+	default:
+		return nil, fmt.Errorf("one of template-json-file, template-spec, or template-spec arguments is required")
+	}
+}
+
 func ParseTupleSpec(spec string) (types.Tuple, error) {
 	parts, err := splitSpecFields(spec)
 	if err != nil {

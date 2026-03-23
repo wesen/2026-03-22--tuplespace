@@ -91,6 +91,48 @@ func TestCLIOutAcceptsMultiplePositionalTupleSpecs(t *testing.T) {
 	require.Contains(t, second, `"ready": false`)
 }
 
+func TestCLIRdAcceptsMultiplePositionalTemplateSpecs(t *testing.T) {
+	db := testpostgres.Start(t)
+	serverBin := buildBinary(t, "tuplespaced", "./cmd/tuplespaced")
+	cliBin := buildBinary(t, "tuplespacectl", "./cmd/tuplespacectl")
+	serverURL, stop := startServerProcess(t, serverBin, db.URL)
+	defer stop()
+
+	runCLI(t, cliBin, serverURL, "tuple", "out", "--space", "jobs", "--output", "json", `job,1,true`, `worker,2,false`)
+
+	output := runCLI(t, cliBin, serverURL, "tuple", "rd", "--space", "jobs", "--output", "json", `job,?id:int,?ready:bool`, `worker,?id:int,?ready:bool`)
+	require.Contains(t, output, `"index": 0`)
+	require.Contains(t, output, `"index": 1`)
+	require.Contains(t, output, `"id": 1`)
+	require.Contains(t, output, `"ready": true`)
+	require.Contains(t, output, `"id": 2`)
+	require.Contains(t, output, `"ready": false`)
+}
+
+func TestCLIInAcceptsMultiplePositionalTemplateSpecs(t *testing.T) {
+	db := testpostgres.Start(t)
+	serverBin := buildBinary(t, "tuplespaced", "./cmd/tuplespaced")
+	cliBin := buildBinary(t, "tuplespacectl", "./cmd/tuplespacectl")
+	serverURL, stop := startServerProcess(t, serverBin, db.URL)
+	defer stop()
+
+	runCLI(t, cliBin, serverURL, "tuple", "out", "--space", "jobs", "--output", "json", `job,1,true`, `worker,2,false`)
+
+	output := runCLI(t, cliBin, serverURL, "tuple", "in", "--space", "jobs", "--output", "json", `job,?id:int,?ready:bool`, `worker,?id:int,?ready:bool`)
+	require.Contains(t, output, `"index": 0`)
+	require.Contains(t, output, `"index": 1`)
+	require.Contains(t, output, `"id": 1`)
+	require.Contains(t, output, `"ready": true`)
+	require.Contains(t, output, `"id": 2`)
+	require.Contains(t, output, `"ready": false`)
+
+	missingJob := runCLIExpectError(t, cliBin, serverURL, "tuple", "rd", "--space", "jobs", "--template-spec", `job,?id:int,?ready:bool`, "--output", "json")
+	require.Contains(t, missingJob, "Error: not_found: tuple not found")
+
+	missingWorker := runCLIExpectError(t, cliBin, serverURL, "tuple", "rd", "--space", "jobs", "--template-spec", `worker,?id:int,?ready:bool`, "--output", "json")
+	require.Contains(t, missingWorker, "Error: not_found: tuple not found")
+}
+
 func startServerProcess(t *testing.T, serverBin string, databaseURL string) (string, func()) {
 	t.Helper()
 
@@ -184,6 +226,17 @@ func runCLI(t *testing.T, cliBin string, serverURL string, args ...string) strin
 	cmd := exec.Command(cliBin, allArgs...)
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
+	return string(output)
+}
+
+func runCLIExpectError(t *testing.T, cliBin string, serverURL string, args ...string) string {
+	t.Helper()
+
+	allArgs := append([]string{}, args...)
+	allArgs = append(allArgs, "--server-url", serverURL)
+	cmd := exec.Command(cliBin, allArgs...)
+	output, err := cmd.CombinedOutput()
+	require.Error(t, err, string(output))
 	return string(output)
 }
 
