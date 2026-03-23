@@ -75,7 +75,7 @@ func (c *InCommand) RunIntoGlazeProcessor(ctx context.Context, vals *values.Valu
 		return err
 	}
 
-	cliClient := client.New(settings.ServerURL)
+	cliClient := client.NewWithTimeout(settings.ServerURL, client.TimeoutForWaitMS(int64(settings.WaitMS)))
 	for i, template := range templates {
 		response, err := cliClient.In(ctx, settings.Space, template, int64(settings.WaitMS))
 		if err != nil {

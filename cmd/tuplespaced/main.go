@@ -15,9 +15,12 @@ import (
 	glazedlogging "github.com/go-go-golems/glazed/pkg/cmds/logging"
 	"github.com/go-go-golems/glazed/pkg/cmds/schema"
 	"github.com/go-go-golems/glazed/pkg/cmds/values"
+	"github.com/go-go-golems/glazed/pkg/help"
+	helpcmd "github.com/go-go-golems/glazed/pkg/help/cmd"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
+	serverdoc "github.com/manuel/wesen/tuplespace/cmd/tuplespaced/doc"
 	"github.com/manuel/wesen/tuplespace/internal/api/httpapi"
 	"github.com/manuel/wesen/tuplespace/internal/config"
 	"github.com/manuel/wesen/tuplespace/internal/migrations"
@@ -62,6 +65,12 @@ func newRootCommand() (*cobra.Command, error) {
 	if err := glazedlogging.AddLoggingSectionToRootCommand(rootCmd, "tuplespaced"); err != nil {
 		return nil, err
 	}
+
+	helpSystem := help.NewHelpSystem()
+	if err := serverdoc.AddDocToHelpSystem(helpSystem); err != nil {
+		return nil, err
+	}
+	helpcmd.SetupCobraRootCommand(helpSystem, rootCmd)
 	return rootCmd, nil
 }
 

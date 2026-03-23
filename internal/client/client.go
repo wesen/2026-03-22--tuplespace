@@ -13,6 +13,11 @@ import (
 	"github.com/manuel/wesen/tuplespace/internal/types"
 )
 
+const (
+	defaultHTTPTimeout    = 15 * time.Second
+	blockingRequestBuffer = 5 * time.Second
+)
+
 type Client struct {
 	baseURL string
 	http    *http.Client
@@ -43,10 +48,30 @@ type errorEnvelope struct {
 }
 
 func New(baseURL string) *Client {
+	return NewWithTimeout(baseURL, defaultHTTPTimeout)
+}
+
+func NewWithTimeout(baseURL string, timeout time.Duration) *Client {
+	if timeout <= 0 {
+		timeout = defaultHTTPTimeout
+	}
+
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
-		http:    &http.Client{Timeout: 15 * time.Second},
+		http:    &http.Client{Timeout: timeout},
 	}
+}
+
+func TimeoutForWaitMS(waitMS int64) time.Duration {
+	if waitMS <= 0 {
+		return defaultHTTPTimeout
+	}
+
+	timeout := time.Duration(waitMS)*time.Millisecond + blockingRequestBuffer
+	if timeout < defaultHTTPTimeout {
+		return defaultHTTPTimeout
+	}
+	return timeout
 }
 
 func (c *Client) Out(ctx context.Context, space string, tuple types.Tuple) (*OutResponse, error) {
