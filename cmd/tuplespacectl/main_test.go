@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -198,6 +199,48 @@ func TestCLIAdminTupleAndFilteredCommands(t *testing.T) {
 	require.Contains(t, missing, "Error: not_found: tuple not found")
 }
 
+func TestCLIAdminPurgeAndNotifyTest(t *testing.T) {
+	db := testpostgres.Start(t)
+	serverBin := buildBinary(t, "tuplespaced", "./cmd/tuplespaced")
+	cliBin := buildBinary(t, "tuplespacectl", "./cmd/tuplespacectl")
+	serverURL, stop := startServerProcess(t, serverBin, db.URL)
+	defer stop()
+
+	runCLI(t, cliBin, serverURL, "tuple", "out", "--space", "jobs", "--output", "json", `job,1,true`, `job,2,false`)
+	runCLI(t, cliBin, serverURL, "tuple", "out", "--space", "workers", "--output", "json", `worker,3,true`)
+
+	missingConfirm := runCLIExpectError(t, cliBin, serverURL, "admin", "purge", "--space", "jobs", "--output", "json")
+	require.Contains(t, missingConfirm, "Error: confirm_required: confirm flag required")
+
+	purgeOutput := runCLI(t, cliBin, serverURL, "admin", "purge", "--space", "jobs", "--confirm", "--output", "json")
+	require.Contains(t, purgeOutput, `"deleted_count": 2`)
+
+	workers := runCLI(t, cliBin, serverURL, "admin", "dump", "--space", "workers", "--output", "json")
+	require.Contains(t, workers, `"space": "workers"`)
+
+	readerDone := make(chan string, 1)
+	readerErr := make(chan error, 1)
+	go func() {
+		output, err := runCLIResult(cliBin, serverURL, "tuple", "rd", "--space", "jobs", "--template-spec", `job,?id:int,?ready:bool`, "--wait-ms", "3000", "--output", "json")
+		readerDone <- output
+		readerErr <- err
+	}()
+
+	require.Eventually(t, func() bool {
+		output := runCLI(t, cliBin, serverURL, "admin", "waiters", "--output", "json")
+		return strings.Contains(output, `"space": "jobs"`)
+	}, 2*time.Second, 50*time.Millisecond)
+
+	notifyOutput := runCLI(t, cliBin, serverURL, "admin", "notify-test", "--space", "jobs", "--output", "json")
+	require.Contains(t, notifyOutput, `"space": "jobs"`)
+	require.Contains(t, notifyOutput, `"subscriber_count": 1`)
+	require.Contains(t, notifyOutput, `"channel_subscriber_count": 1`)
+
+	runCLI(t, cliBin, serverURL, "tuple", "out", "--space", "jobs", "--output", "json", `job,9,true`)
+	require.NoError(t, <-readerErr)
+	require.Contains(t, <-readerDone, `"id": 9`)
+}
+
 func startServerProcess(t *testing.T, serverBin string, databaseURL string) (string, func()) {
 	t.Helper()
 
@@ -286,12 +329,17 @@ func waitForHealth(t *testing.T, serverURL string) {
 func runCLI(t *testing.T, cliBin string, serverURL string, args ...string) string {
 	t.Helper()
 
+	output, err := runCLIResult(cliBin, serverURL, args...)
+	require.NoError(t, err, string(output))
+	return output
+}
+
+func runCLIResult(cliBin string, serverURL string, args ...string) (string, error) {
 	allArgs := append([]string{}, args...)
 	allArgs = append(allArgs, "--server-url", serverURL)
 	cmd := exec.Command(cliBin, allArgs...)
 	output, err := cmd.CombinedOutput()
-	require.NoError(t, err, string(output))
-	return string(output)
+	return string(output), err
 }
 
 func runCLIExpectError(t *testing.T, cliBin string, serverURL string, args ...string) string {

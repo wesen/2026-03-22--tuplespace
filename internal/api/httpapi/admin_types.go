@@ -6,6 +6,11 @@ type FilterRequest struct {
 	Filter admin.TupleFilter `json:"filter"`
 }
 
+type PurgeRequest struct {
+	Filter  admin.TupleFilter `json:"filter"`
+	Confirm bool              `json:"confirm"`
+}
+
 type NotifyTestRequest struct {
 	Space string `json:"space"`
 }

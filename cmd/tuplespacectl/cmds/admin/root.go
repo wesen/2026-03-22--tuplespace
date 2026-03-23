@@ -32,6 +32,10 @@ func NewCommand() (*cobra.Command, error) {
 	if err != nil {
 		return nil, err
 	}
+	purgeCmd, err := NewPurgeCommand()
+	if err != nil {
+		return nil, err
+	}
 	statsCmd, err := NewStatsCommand()
 	if err != nil {
 		return nil, err
@@ -48,10 +52,14 @@ func NewCommand() (*cobra.Command, error) {
 	if err != nil {
 		return nil, err
 	}
+	notifyTestCmd, err := NewNotifyTestCommand()
+	if err != nil {
+		return nil, err
+	}
 	tupleCmd, err := adminTuple.NewCommand()
 	if err != nil {
 		return nil, err
 	}
-	root.AddCommand(healthCmd, spacesCmd, dumpCmd, peekCmd, exportCmd, statsCmd, configCmd, schemaCmd, waitersCmd, tupleCmd)
+	root.AddCommand(healthCmd, spacesCmd, dumpCmd, peekCmd, exportCmd, purgeCmd, statsCmd, configCmd, schemaCmd, waitersCmd, notifyTestCmd, tupleCmd)
 	return root, nil
 }

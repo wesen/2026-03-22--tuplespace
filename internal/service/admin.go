@@ -105,14 +105,14 @@ func (s *Service) Schema(ctx context.Context) (admin.SchemaSnapshot, error) {
 
 func (s *Service) GetTuple(ctx context.Context, tupleID int64) (admin.TupleRecord, bool, error) {
 	if tupleID <= 0 {
-		return admin.TupleRecord{}, false, fmt.Errorf("tuple id must be > 0")
+		return admin.TupleRecord{}, false, validation.NewError("invalid_tuple_id", "tuple id must be > 0")
 	}
 	return s.store.GetTupleByID(ctx, s.db, tupleID)
 }
 
 func (s *Service) DeleteTuple(ctx context.Context, tupleID int64) (admin.DeleteResult, error) {
 	if tupleID <= 0 {
-		return admin.DeleteResult{}, fmt.Errorf("tuple id must be > 0")
+		return admin.DeleteResult{}, validation.NewError("invalid_tuple_id", "tuple id must be > 0")
 	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -184,13 +184,13 @@ func validateTupleFilter(filter admin.TupleFilter) error {
 		}
 	}
 	if filter.Limit < 0 {
-		return fmt.Errorf("limit must be >= 0")
+		return validation.NewError("invalid_filter", "limit must be >= 0")
 	}
 	if filter.Offset < 0 {
-		return fmt.Errorf("offset must be >= 0")
+		return validation.NewError("invalid_filter", "offset must be >= 0")
 	}
 	if filter.CreatedBefore != nil && filter.CreatedAfter != nil && !filter.CreatedAfter.Before(*filter.CreatedBefore) {
-		return fmt.Errorf("created_after must be before created_before")
+		return validation.NewError("invalid_filter", "created_after must be before created_before")
 	}
 	return nil
 }

@@ -9,6 +9,10 @@ func (e *Error) Error() string {
 	return e.Message
 }
 
-func newError(code, message string) *Error {
+func NewError(code, message string) *Error {
 	return &Error{Code: code, Message: message}
+}
+
+func newError(code, message string) *Error {
+	return NewError(code, message)
 }

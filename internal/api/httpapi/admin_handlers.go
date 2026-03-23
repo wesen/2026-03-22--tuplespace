@@ -6,6 +6,7 @@ import (
 
 	"github.com/manuel/wesen/tuplespace/internal/admin"
 	"github.com/manuel/wesen/tuplespace/internal/service"
+	"github.com/manuel/wesen/tuplespace/internal/validation"
 )
 
 func (h *Handlers) handleAdminSpaces(w http.ResponseWriter, r *http.Request) {
@@ -83,9 +84,13 @@ func (h *Handlers) handleAdminTupleDelete(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handlers) handleAdminPurge(w http.ResponseWriter, r *http.Request) {
-	var req FilterRequest
+	var req PurgeRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeMappedError(w, err)
+		return
+	}
+	if !req.Confirm {
+		writeMappedError(w, validation.NewError("confirm_required", "confirm flag required"))
 		return
 	}
 	result, err := h.service.Purge(r.Context(), req.Filter)

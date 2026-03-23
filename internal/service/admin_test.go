@@ -57,3 +57,33 @@ func TestServiceStatsAndWaiters(t *testing.T) {
 		return len(waiters) == 0
 	}, time.Second, 20*time.Millisecond)
 }
+
+func TestServiceNotifyTestReportsSubscribers(t *testing.T) {
+	svc := newTestService(t)
+	template := types.Template{Fields: []types.TemplateField{
+		{Kind: types.FieldActual, Type: types.TypeString, Value: "job"},
+	}}
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := svc.Rd(context.Background(), "jobs", template, 2*time.Second)
+		done <- err
+	}()
+
+	require.Eventually(t, func() bool {
+		stats, err := svc.Stats(context.Background())
+		require.NoError(t, err)
+		return stats.NotifierSubscribers == 1
+	}, 2*time.Second, 20*time.Millisecond)
+
+	result, err := svc.NotifyTest(context.Background(), "jobs")
+	require.NoError(t, err)
+	require.Equal(t, "jobs", result.Space)
+	require.Equal(t, 1, result.SubscriberCount)
+	require.Equal(t, 1, result.ChannelSubscriberCount)
+
+	require.NoError(t, svc.Out(context.Background(), "jobs", types.Tuple{Fields: []types.TupleField{
+		{Type: types.TypeString, Value: "job"},
+	}}))
+	require.NoError(t, <-done)
+}

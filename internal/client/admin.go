@@ -127,9 +127,9 @@ func (c *Client) DeleteTuple(ctx context.Context, tupleID int64) (admin.DeleteRe
 	return response.Result, nil
 }
 
-func (c *Client) Purge(ctx context.Context, filter admin.TupleFilter) (admin.PurgeResult, error) {
+func (c *Client) Purge(ctx context.Context, filter admin.TupleFilter, confirm bool) (admin.PurgeResult, error) {
 	var response purgeEnvelope
-	if err := c.post(ctx, "/v1/admin/purge", map[string]any{"filter": filter}, &response); err != nil {
+	if err := c.post(ctx, "/v1/admin/purge", map[string]any{"filter": filter, "confirm": confirm}, &response); err != nil {
 		return admin.PurgeResult{}, err
 	}
 	return response.Result, nil
