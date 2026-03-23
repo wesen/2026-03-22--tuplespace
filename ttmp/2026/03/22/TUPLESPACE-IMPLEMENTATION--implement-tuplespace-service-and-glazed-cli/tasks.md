@@ -20,5 +20,6 @@
 - [x] Add end-to-end HTTP tests against the real Postgres-backed service.
 - [x] Implement the `tuplespacectl` Glazed CLI with `tuple out`, `tuple rd`, `tuple in`, and `admin health`.
 - [x] Add CLI-level tests and manual smoke checks against a live local service.
+- [x] Allow `tuple rd` and `tuple in` to accept multiple positional template specs with one result row per query.
 - [x] Update the ticket docs, changelog, and diary with implementation evidence and commit hashes.
 - [ ] Close the ticket after implementation work is completed and reviewed.

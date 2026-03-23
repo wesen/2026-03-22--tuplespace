@@ -93,3 +93,15 @@ Enabled env defaults in tuplespacectl and allowed tuple out to accept multiple p
 - /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go — Shared Glazed builder now enables env parsing and tuple input selection now supports positional multi-out
 - /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/out.go — tuple out now accepts positional tuple-spec arguments and emits one row per inserted tuple
 - /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go — Added built-binary tests for env defaults and multi-tuple positional out
+
+
+## 2026-03-22
+
+Allowed `tuple rd` and `tuple in` to accept multiple positional template specs and validated the live CLI/server path with destructive consume checks (commit c32d4cd)
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go — Added shared template-input selection for file, flag, or positional template arguments
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/rd.go — `tuple rd` now accepts positional `template-specs...` and emits one row per query
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/in.go — `tuple in` now accepts positional `template-specs...` and emits one row per query
+- /home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go — Added built-binary tests for multi-query `rd`/`in` and destructive not-found follow-up assertions

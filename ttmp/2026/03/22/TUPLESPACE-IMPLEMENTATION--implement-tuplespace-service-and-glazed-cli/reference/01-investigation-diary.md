@@ -1057,6 +1057,116 @@ Allow the multiple arguments to out with a tuple per argument
   - `--tuple-spec`
 - Mixed input sources are rejected explicitly.
 
+## Step 10: Allow Positional Multi-Template Queries For `rd` And `in`
+
+This step extended the CLI symmetry work that started with multi-tuple `out`. The goal was to let operators issue several read or consume queries in one invocation by passing one template DSL expression per positional argument, while keeping the existing file and single-flag paths intact.
+
+The implementation itself was straightforward, but the verification exposed one real behavioral detail that was worth recording: the CLI surfaces server errors like `not_found` as plain-text command errors, not as JSON envelopes, even when `--output json` is present. That distinction mattered when proving that `in` really consumed both tuples and that the follow-up `rd` calls failed for the expected reason.
+
+### Prompt Context
+
+**User prompt (verbatim):** "do the same for in and rd"
+
+**Assistant interpretation:** Extend `tuple rd` and `tuple in` so they accept multiple positional template specs, matching the multi-positional behavior already added to `tuple out`.
+
+**Inferred user intent:** Remove the remaining CLI asymmetry so batch query and batch consume workflows are easier to type and reason about.
+
+**Commit (code):** c32d4cd — "Support positional multi-query rd and in"
+
+### What I did
+
+- Added `LoadTemplateInputs` to `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go`.
+- Kept the source-selection rule strict so `tuple rd` and `tuple in` now accept exactly one of:
+  - `--template-json-file`
+  - `--template-spec`
+  - positional `template-specs...`
+- Updated `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/rd.go` to:
+  - declare positional `template-specs`,
+  - parse multiple templates,
+  - emit one output row per query with an `index`.
+- Updated `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/in.go` with the same positional multi-query behavior and output shape.
+- Added unit coverage in `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common_test.go` for:
+  - parsing multiple template specs,
+  - rejecting mixed template input sources.
+- Added built-binary CLI tests in `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go` covering:
+  - multi-template positional `rd`,
+  - multi-template positional `in`,
+  - follow-up `not_found` checks proving destructive consume behavior.
+- Ran:
+  - `go test ./cmd/tuplespacectl/cmds -count=1`
+  - `go test ./cmd/tuplespacectl -count=1`
+  - `go test ./... -count=1`
+
+### Why
+
+- `tuple out` already accepted multiple positional specs, so `rd` and `in` were now the odd commands out.
+- Positional template lists are the most ergonomic syntax for interactive querying because they avoid repetitive flags and map directly onto Cobra/Glazed list arguments.
+- Keeping the file/flag/positional source exclusivity explicit avoids ambiguous precedence and keeps parse diagnostics understandable.
+
+### What worked
+
+- `tuple rd` can now process several positional templates in one invocation and returns one row per query.
+- `tuple in` can now do the same while preserving destructive semantics.
+- The full built-binary CLI suite passed against the real server process and Docker-backed Postgres.
+- The full repository test suite stayed green after the CLI changes.
+
+### What didn't work
+
+- My first version of the destructive follow-up assertion in `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go` reused the success helper:
+  - `runCLI(...)`
+- That failed with the exact output:
+  - `Error: not_found: tuple not found`
+- The behavior was correct; the mistake was expecting a success-path helper to capture an intentional failure case. I fixed it by adding `runCLIExpectError(...)` and asserting on the plain-text error output.
+
+### What I learned
+
+- The CLI currently reports request failures as command errors on stderr/stdout rather than formatting them through the Glazed JSON output path, even when `--output json` is set.
+- For this workflow, the most reliable live assertion of destructive behavior is:
+  - consume tuples with positional `in`,
+  - then issue matching `rd` requests and assert that they fail with `not_found`.
+
+### What was tricky to build
+
+- The main sharp edge was maintaining a clean source-selection contract once positional templates were added. Without an explicit helper, `rd` and `in` would each need to duplicate the same “exactly one of file, flag, or positional args” logic, which is error-prone.
+- The second tricky part was the test harness. The destructive follow-up check intentionally produces a command failure, so the helper layer had to distinguish between “the test failed” and “the command correctly returned a domain error.”
+
+### What warrants a second pair of eyes
+
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go`, especially `LoadTemplateInputs`.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/rd.go`, especially the positional argument definition and one-row-per-query output behavior.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/in.go`, especially the destructive multi-query loop.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`, especially `runCLIExpectError` and the live not-found assertions.
+
+### What should be done in the future
+
+- Document positional multi-query examples for `rd` and `in` in a README or Glazed help page.
+- Decide whether command errors should eventually be rendered as structured output when `--output json` is requested.
+
+### Code review instructions
+
+- Start with:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/rd.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/tuple/in.go`
+- Then review:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/common_test.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`
+- Validate with:
+  - `go test ./cmd/tuplespacectl/cmds -count=1`
+  - `go test ./cmd/tuplespacectl -count=1`
+  - `go test ./... -count=1`
+
+### Technical details
+
+- New CLI examples:
+  - `tuplespacectl tuple rd --space jobs 'job,?id:int' 'worker,?id:int'`
+  - `tuplespacectl tuple in --space jobs 'job,?id:int,?ready:bool' 'worker,?id:int,?ready:bool'`
+- `tuple rd` and `tuple in` still support:
+  - `--template-json-file`
+  - `--template-spec`
+- Mixed template input sources are rejected explicitly with:
+  - `provide exactly one template input source: template-json-file, template-spec, or template-spec arguments`
+
 ## Context
 
 This diary accompanies the primary design guide. The guide explains the system; the diary explains how the guide and ticket were produced and what evidence or workflow decisions mattered during creation.
