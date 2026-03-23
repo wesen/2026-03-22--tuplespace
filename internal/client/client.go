@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -124,20 +125,30 @@ func (c *Client) post(ctx context.Context, path string, requestBody any, dst any
 }
 
 func decodeResponse(res *http.Response, dst any) error {
-	decoder := json.NewDecoder(res.Body)
-	decoder.UseNumber()
-
-	if res.StatusCode >= 400 {
-		var envelope errorEnvelope
-		if err := decoder.Decode(&envelope); err != nil {
-			return fmt.Errorf("decode error response: %w", err)
-		}
-		if envelope.Error.Message != "" {
-			return fmt.Errorf("%s: %s", envelope.Error.Code, envelope.Error.Message)
-		}
-		return fmt.Errorf("request failed with status %d", res.StatusCode)
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
 	}
 
+	if res.StatusCode >= 400 {
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.UseNumber()
+		var envelope errorEnvelope
+		if err := decoder.Decode(&envelope); err == nil {
+			if envelope.Error.Message != "" {
+				return fmt.Errorf("%s: %s", envelope.Error.Code, envelope.Error.Message)
+			}
+		}
+
+		message := strings.TrimSpace(string(body))
+		if message == "" {
+			return fmt.Errorf("request failed with status %d", res.StatusCode)
+		}
+		return fmt.Errorf("request failed with status %d: %s", res.StatusCode, message)
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
 	if err := decoder.Decode(dst); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
