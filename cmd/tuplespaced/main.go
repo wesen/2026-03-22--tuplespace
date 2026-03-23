@@ -132,6 +132,10 @@ func runServer(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 	log.Info().Msg("applied database migrations")
+	migrationFiles, err := migrations.ListFS(os.DirFS("migrations"))
+	if err != nil {
+		return err
+	}
 
 	notifier, err := notify.New(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -140,7 +144,12 @@ func runServer(ctx context.Context, cfg config.Config) error {
 	defer notifier.Close()
 	log.Info().Msg("initialized postgres notifier")
 
-	svc := service.New(db, store.New(), notifier, cfg.CandidateLimit)
+	svc := service.New(db, store.New(), notifier, service.Options{
+		CandidateLimit: cfg.CandidateLimit,
+		StartedAt:      time.Now().UTC(),
+		ConfigSnapshot: service.RedactedConfigSnapshot(cfg.HTTPListenAddr, cfg.DatabaseURL, cfg.CandidateLimit, cfg.ShutdownGrace),
+		MigrationFiles: migrationFiles,
+	})
 	server := &http.Server{
 		Addr:    cfg.HTTPListenAddr,
 		Handler: httpapi.NewHandler(svc),

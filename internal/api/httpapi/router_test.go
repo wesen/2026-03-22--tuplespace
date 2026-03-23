@@ -27,7 +27,12 @@ func newTestRouter(t *testing.T) http.Handler {
 		require.NoError(t, notifier.Close())
 	})
 
-	svc := service.New(db.Pool, store.New(), notifier, 64)
+	svc := service.New(db.Pool, store.New(), notifier, service.Options{
+		CandidateLimit: 64,
+		StartedAt:      time.Now().UTC(),
+		ConfigSnapshot: service.RedactedConfigSnapshot(":8080", db.URL, 64, 10*time.Second),
+		MigrationFiles: []string{"001_init_tuplespace.sql"},
+	})
 	return NewHandler(svc)
 }
 
@@ -119,14 +124,52 @@ func TestRouterBlockingInSucceedsAfterOut(t *testing.T) {
 	}
 }
 
+func TestRouterAdminReadOnlyEndpoints(t *testing.T) {
+	router := newTestRouter(t)
+
+	outBody := map[string]any{
+		"tuple": map[string]any{
+			"fields": []map[string]any{
+				{"type": "string", "value": "job"},
+			},
+		},
+	}
+	require.Equal(t, http.StatusCreated, performJSON(t, router, "/v1/spaces/jobs/out", outBody).Code)
+
+	spacesRes := performRequest(t, router, http.MethodGet, "/v1/admin/spaces", nil)
+	require.Equal(t, http.StatusOK, spacesRes.Code)
+
+	dumpRes := performJSON(t, router, "/v1/admin/dump", map[string]any{
+		"filter": map[string]any{"space": "jobs"},
+	})
+	require.Equal(t, http.StatusOK, dumpRes.Code)
+
+	statsRes := performRequest(t, router, http.MethodGet, "/v1/admin/stats", nil)
+	require.Equal(t, http.StatusOK, statsRes.Code)
+
+	configRes := performRequest(t, router, http.MethodGet, "/v1/admin/config", nil)
+	require.Equal(t, http.StatusOK, configRes.Code)
+
+	schemaRes := performRequest(t, router, http.MethodGet, "/v1/admin/schema", nil)
+	require.Equal(t, http.StatusOK, schemaRes.Code)
+}
+
 func performJSON(t *testing.T, handler http.Handler, path string, body any) *httptest.ResponseRecorder {
+	return performRequest(t, handler, http.MethodPost, path, body)
+}
+
+func performRequest(t *testing.T, handler http.Handler, method string, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 
-	payload, err := json.Marshal(body)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
+	var req *http.Request
+	if body == nil {
+		req = httptest.NewRequest(method, path, nil)
+	} else {
+		payload, err := json.Marshal(body)
+		require.NoError(t, err)
+		req = httptest.NewRequest(method, path, bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+	}
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
 	return res

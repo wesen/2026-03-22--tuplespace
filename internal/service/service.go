@@ -3,11 +3,14 @@ package service
 import (
 	"context"
 	"fmt"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 
+	"github.com/manuel/wesen/tuplespace/internal/admin"
 	"github.com/manuel/wesen/tuplespace/internal/match"
 	"github.com/manuel/wesen/tuplespace/internal/notify"
 	"github.com/manuel/wesen/tuplespace/internal/store"
@@ -21,6 +24,18 @@ type TupleSpace interface {
 	In(ctx context.Context, space string, template types.Template, wait time.Duration) (types.Tuple, types.Bindings, error)
 	Rdp(ctx context.Context, space string, template types.Template) (types.Tuple, types.Bindings, bool, error)
 	Inp(ctx context.Context, space string, template types.Template) (types.Tuple, types.Bindings, bool, error)
+	Spaces(ctx context.Context) ([]admin.SpaceSummary, error)
+	Dump(ctx context.Context, filter admin.TupleFilter) ([]admin.TupleRecord, error)
+	Peek(ctx context.Context, filter admin.TupleFilter) ([]admin.TupleRecord, error)
+	Export(ctx context.Context, filter admin.TupleFilter) ([]admin.TupleRecord, error)
+	Stats(ctx context.Context) (admin.StatsSnapshot, error)
+	Config(ctx context.Context) (admin.ConfigSnapshot, error)
+	Schema(ctx context.Context) (admin.SchemaSnapshot, error)
+	GetTuple(ctx context.Context, tupleID int64) (admin.TupleRecord, bool, error)
+	DeleteTuple(ctx context.Context, tupleID int64) (admin.DeleteResult, error)
+	Purge(ctx context.Context, filter admin.TupleFilter) (admin.PurgeResult, error)
+	Waiters(ctx context.Context) ([]admin.WaiterInfo, error)
+	NotifyTest(ctx context.Context, space string) (admin.NotifyTestResult, error)
 }
 
 type Service struct {
@@ -28,17 +43,38 @@ type Service struct {
 	store          *store.TupleStore
 	notifier       *notify.Notifier
 	candidateLimit int
+	startedAt      time.Time
+	configSnapshot admin.ConfigSnapshot
+	migrationFiles []string
+
+	waitersMu     sync.Mutex
+	nextWaiterID  uint64
+	activeWaiters map[uint64]admin.WaiterInfo
 }
 
-func New(db *pgxpool.Pool, tupleStore *store.TupleStore, notifier *notify.Notifier, candidateLimit int) *Service {
-	if candidateLimit <= 0 {
-		candidateLimit = 64
+type Options struct {
+	CandidateLimit int
+	StartedAt      time.Time
+	ConfigSnapshot admin.ConfigSnapshot
+	MigrationFiles []string
+}
+
+func New(db *pgxpool.Pool, tupleStore *store.TupleStore, notifier *notify.Notifier, options Options) *Service {
+	if options.CandidateLimit <= 0 {
+		options.CandidateLimit = 64
+	}
+	if options.StartedAt.IsZero() {
+		options.StartedAt = time.Now().UTC()
 	}
 	return &Service{
 		db:             db,
 		store:          tupleStore,
 		notifier:       notifier,
-		candidateLimit: candidateLimit,
+		candidateLimit: options.CandidateLimit,
+		startedAt:      options.StartedAt,
+		configSnapshot: options.ConfigSnapshot,
+		migrationFiles: append([]string(nil), options.MigrationFiles...),
+		activeWaiters:  map[uint64]admin.WaiterInfo{},
 	}
 }
 
@@ -121,12 +157,19 @@ func (s *Service) read(ctx context.Context, space string, template types.Templat
 	defer cancel()
 
 	var sub notify.Subscription
+	var waiterID uint64
+	waiterRegistered := false
 	if wait > 0 {
 		sub, err = s.notifier.Subscribe(space)
 		if err != nil {
 			return types.Tuple{}, nil, err
 		}
 		defer sub.Close()
+		defer func() {
+			if waiterRegistered {
+				s.unregisterWaiter(waiterID)
+			}
+		}()
 	}
 
 	for {
@@ -162,6 +205,11 @@ func (s *Service) read(ctx context.Context, space string, template types.Templat
 				Bool("destructive", destructive).
 				Msg("no matching tuple found")
 			return types.Tuple{}, nil, ErrNotFound
+		}
+
+		if !waiterRegistered {
+			waiterID = s.registerWaiter(space, normalizedTemplate, wait, destructive)
+			waiterRegistered = true
 		}
 
 		log.Debug().
@@ -234,4 +282,48 @@ func withOptionalTimeout(ctx context.Context, wait time.Duration) (context.Conte
 		return context.WithCancel(ctx)
 	}
 	return context.WithTimeout(ctx, wait)
+}
+
+func (s *Service) registerWaiter(space string, template types.Template, wait time.Duration, destructive bool) uint64 {
+	s.waitersMu.Lock()
+	defer s.waitersMu.Unlock()
+
+	s.nextWaiterID++
+	id := s.nextWaiterID
+	operation := "rd"
+	if destructive {
+		operation = "in"
+	}
+	s.activeWaiters[id] = admin.WaiterInfo{
+		ID:        id,
+		Space:     space,
+		Operation: operation,
+		WaitMS:    wait.Milliseconds(),
+		StartedAt: time.Now().UTC(),
+		Template:  template,
+	}
+	return id
+}
+
+func (s *Service) unregisterWaiter(id uint64) {
+	s.waitersMu.Lock()
+	defer s.waitersMu.Unlock()
+	delete(s.activeWaiters, id)
+}
+
+func (s *Service) waitersSnapshot() []admin.WaiterInfo {
+	s.waitersMu.Lock()
+	defer s.waitersMu.Unlock()
+
+	ret := make([]admin.WaiterInfo, 0, len(s.activeWaiters))
+	for _, waiter := range s.activeWaiters {
+		ret = append(ret, waiter)
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		if ret[i].StartedAt.Equal(ret[j].StartedAt) {
+			return ret[i].ID < ret[j].ID
+		}
+		return ret[i].StartedAt.Before(ret[j].StartedAt)
+	})
+	return ret
 }

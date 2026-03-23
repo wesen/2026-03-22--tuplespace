@@ -24,7 +24,12 @@ func newTestService(t *testing.T) *Service {
 		require.NoError(t, notifier.Close())
 	})
 
-	return New(db.Pool, store.New(), notifier, 64)
+	return New(db.Pool, store.New(), notifier, Options{
+		CandidateLimit: 64,
+		StartedAt:      time.Now().UTC(),
+		ConfigSnapshot: RedactedConfigSnapshot(":8080", db.URL, 64, 10*time.Second),
+		MigrationFiles: []string{"001_init_tuplespace.sql"},
+	})
 }
 
 func TestServiceRdpIsNonDestructive(t *testing.T) {

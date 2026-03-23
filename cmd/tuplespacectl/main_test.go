@@ -133,6 +133,37 @@ func TestCLIInAcceptsMultiplePositionalTemplateSpecs(t *testing.T) {
 	require.Contains(t, missingWorker, "Error: not_found: tuple not found")
 }
 
+func TestCLIAdminReadOnlyCommands(t *testing.T) {
+	db := testpostgres.Start(t)
+	serverBin := buildBinary(t, "tuplespaced", "./cmd/tuplespaced")
+	cliBin := buildBinary(t, "tuplespacectl", "./cmd/tuplespacectl")
+	serverURL, stop := startServerProcess(t, serverBin, db.URL)
+	defer stop()
+
+	runCLI(t, cliBin, serverURL, "tuple", "out", "--space", "jobs", "--output", "json", `job,1,true`, `job,2,false`)
+	runCLI(t, cliBin, serverURL, "tuple", "out", "--space", "workers", "--output", "json", `worker,3,true`)
+
+	spaces := runCLI(t, cliBin, serverURL, "admin", "spaces", "--output", "json")
+	require.Contains(t, spaces, `"space": "jobs"`)
+	require.Contains(t, spaces, `"space": "workers"`)
+
+	dump := runCLI(t, cliBin, serverURL, "admin", "dump", "--space", "jobs", "--output", "json")
+	require.Contains(t, dump, `"space": "jobs"`)
+	require.Contains(t, dump, `"id":`)
+
+	stats := runCLI(t, cliBin, serverURL, "admin", "stats", "--output", "json")
+	require.Contains(t, stats, `"tuple_count": 3`)
+	require.Contains(t, stats, `"space_count": 2`)
+
+	config := runCLI(t, cliBin, serverURL, "admin", "config", "--output", "json")
+	require.Contains(t, config, `"database_url":`)
+	require.Contains(t, config, `"candidate_limit": 64`)
+
+	schema := runCLI(t, cliBin, serverURL, "admin", "schema", "--output", "json")
+	require.Contains(t, schema, `"migration_files":`)
+	require.Contains(t, schema, `"tuples_space_arity_id_idx"`)
+}
+
 func startServerProcess(t *testing.T, serverBin string, databaseURL string) (string, func()) {
 	t.Helper()
 

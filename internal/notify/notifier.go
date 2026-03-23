@@ -18,6 +18,12 @@ type Subscription interface {
 	Close() error
 }
 
+type Snapshot struct {
+	ChannelCount    int
+	SubscriberCount int
+	Channels        map[string]int
+}
+
 type Notifier struct {
 	conn      *pgx.Conn
 	controlCh chan controlRequest
@@ -106,6 +112,36 @@ func (n *Notifier) Close() error {
 	})
 	<-n.doneCh
 	return err
+}
+
+func (n *Notifier) Snapshot() (Snapshot, error) {
+	var snapshot Snapshot
+	err := n.execute(func(st *state) error {
+		channels := make(map[string]int, len(st.subscribers))
+		subscriberCount := 0
+		for channel, subs := range st.subscribers {
+			channels[channel] = len(subs)
+			subscriberCount += len(subs)
+		}
+		snapshot = Snapshot{
+			ChannelCount:    len(channels),
+			SubscriberCount: subscriberCount,
+			Channels:        channels,
+		}
+		return nil
+	})
+	return snapshot, err
+}
+
+func (n *Notifier) Notify(ctx context.Context, space string) error {
+	channel := ChannelName(space)
+	return n.execute(func(st *state) error {
+		_ = st
+		if _, err := n.conn.Exec(ctx, `SELECT pg_notify($1, '')`, channel); err != nil {
+			return fmt.Errorf("notify %s: %w", channel, err)
+		}
+		return nil
+	})
 }
 
 func (n *Notifier) loop() {
