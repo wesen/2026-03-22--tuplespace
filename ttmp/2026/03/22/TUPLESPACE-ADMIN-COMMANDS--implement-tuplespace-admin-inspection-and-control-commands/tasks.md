@@ -5,10 +5,10 @@
 - [x] Inspect the existing TupleSpace service, HTTP API, notifier, config, and CLI layout to ground the admin-command design.
 - [x] Create the `TUPLESPACE-ADMIN-COMMANDS` ticket with a design plan and implementation diary.
 - [x] Write a detailed implementation plan covering API shape, service/store changes, instrumentation, safety rules, and rollout order.
-- [ ] Add store-level read models for tuple metadata, space summaries, raw tuple lookup, filtered listing, and export iteration.
-- [ ] Add store-level mutating admin operations for delete-by-id and purge-by-filter.
-- [ ] Add notifier introspection for subscriber counts and a safe test notification entry point.
-- [ ] Add service-level admin interfaces and implementations for:
+- [x] Add store-level read models for tuple metadata, space summaries, raw tuple lookup, filtered listing, and export iteration.
+- [x] Add store-level mutating admin operations for delete-by-id and purge-by-filter.
+- [x] Add notifier introspection for subscriber counts and a safe test notification entry point.
+- [x] Add service-level admin interfaces and implementations for:
   - spaces
   - dump
   - stats
@@ -21,10 +21,10 @@
   - purge
   - waiters
   - notify-test
-- [ ] Add runtime waiter instrumentation so blocked `rd`/`in` operations can be listed safely.
-- [ ] Extend the HTTP API router and handlers with admin endpoints for all planned commands.
-- [ ] Extend the CLI client with request/response helpers for all admin endpoints.
-- [ ] Implement the read-only admin CLI commands:
+- [x] Add runtime waiter instrumentation so blocked `rd`/`in` operations can be listed safely.
+- [x] Extend the HTTP API router and handlers with admin endpoints for all planned commands.
+- [x] Extend the CLI client with request/response helpers for all admin endpoints.
+- [x] Implement the read-only admin CLI commands:
   - `admin spaces`
   - `admin dump`
   - `admin stats`
@@ -40,7 +40,7 @@
   - `admin purge`
   - `admin waiters`
   - `admin notify-test`
-- [ ] Add HTTP handler tests for the new admin endpoints.
+- [x] Add HTTP handler tests for the new admin endpoints.
 - [ ] Add store and service tests for admin queries, tuple deletion, purge filters, notifier testing, and waiter introspection.
 - [ ] Add built-binary CLI tests covering the new admin commands against the real server path.
 - [ ] Run full verification with targeted package tests and `go test ./... -count=1`.

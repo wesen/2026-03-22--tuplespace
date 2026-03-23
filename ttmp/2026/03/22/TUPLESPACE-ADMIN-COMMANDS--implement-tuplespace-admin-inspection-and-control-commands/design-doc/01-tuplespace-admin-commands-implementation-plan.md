@@ -10,12 +10,20 @@ DocType: design-doc
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: cmd/tuplespacectl/cmds/admin/dump.go
+      Note: Represents the first user-facing read-only admin command built from the plan
     - Path: cmd/tuplespacectl/cmds/admin/root.go
       Note: CLI admin group will host the new commands
+    - Path: internal/admin/models.go
+      Note: Shared admin contracts introduced in the first implementation slice
     - Path: internal/api/httpapi/router.go
       Note: Admin routes will be added under /v1/admin
+    - Path: internal/service/admin.go
+      Note: Implements the planned admin service contract and runtime snapshots
     - Path: internal/service/service.go
       Note: Admin design depends on service-owned runtime state and tuple orchestration
+    - Path: internal/store/admin_store.go
+      Note: Implements the planned admin store queries and destructive filter operations
     - Path: internal/store/tuple_store.go
       Note: Admin plan adds store queries for tuple listing
 ExternalSources: []
@@ -24,6 +32,7 @@ LastUpdated: 2026-03-22T21:46:19.189552802-04:00
 WhatFor: ""
 WhenToUse: ""
 ---
+
 
 
 # TupleSpace admin commands implementation plan

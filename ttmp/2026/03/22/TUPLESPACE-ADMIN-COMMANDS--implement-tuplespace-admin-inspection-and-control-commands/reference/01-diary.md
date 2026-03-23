@@ -10,10 +10,18 @@ DocType: reference
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: cmd/tuplespacectl/cmds/admin/stats.go
+      Note: Diary tracks the first end-user admin read-only commands
     - Path: cmd/tuplespacectl/main_test.go
-      Note: Diary will record built-binary admin command validation
+      Note: |-
+        Diary will record built-binary admin command validation
+        Diary records built-binary admin CLI verification
+    - Path: internal/admin/models.go
+      Note: Diary tracks the introduction of shared admin contracts
     - Path: internal/notify/notifier.go
       Note: Diary tracks notifier snapshot and test notification changes
+    - Path: internal/service/admin.go
+      Note: Diary records runtime snapshot and waiter instrumentation work
     - Path: internal/service/service.go
       Note: Diary tracks service instrumentation and waiter lifecycle work
 ExternalSources: []
@@ -22,6 +30,7 @@ LastUpdated: 2026-03-22T21:46:19.191532652-04:00
 WhatFor: ""
 WhenToUse: ""
 ---
+
 
 
 # Diary
@@ -123,6 +132,147 @@ The resulting design deliberately groups the work into read-only inspection, tup
   - `POST /v1/admin/purge`
   - `GET /v1/admin/waiters`
   - `POST /v1/admin/notify-test`
+
+## Step 2: Add The Read-Only Admin Surface And Shared Server Foundations
+
+This step implemented the first functional admin slice end to end. The visible outcome was a usable read-only operator surface in `tuplespacectl admin`, but the more important architectural work happened underneath: the server now has a real admin API namespace, typed admin data models, store-level tuple listing and lookup queries, service-level runtime snapshots, and notifier introspection.
+
+I deliberately implemented more backend infrastructure than the first CLI commands strictly needed. That reduced future churn because tuple-targeted operations, export, purge, and notify diagnostics all depend on the same admin contracts. The main bug in this slice came from over-reusing the tuple list query builder: the `COUNT(*)` path accidentally inherited an `ORDER BY`, which Postgres rejected. Fixing that early was important because both `stats` and the new store tests depended on the count path.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 1)
+
+**Assistant interpretation:** Start implementing the new admin ticket in incremental slices, with tests and commits after each meaningful milestone.
+
+**Inferred user intent:** Get the admin command set built in a disciplined way, with each milestone producing real working functionality rather than only scaffolding.
+
+**Commit (code):** ae1f1c6 — "Add read-only tuplespace admin commands"
+
+### What I did
+
+- Added shared admin data models in `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/admin/models.go`.
+- Added store-level admin queries in:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/store/admin_store.go`
+- Added notifier runtime introspection and test notification support in:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/notify/notifier.go`
+- Extended the service with:
+  - runtime config snapshots,
+  - migration file tracking,
+  - waiter instrumentation,
+  - admin methods for spaces, dump, stats, config, schema, get/delete, export/peek, purge, waiters, and notify-test.
+- Added migration file listing support in:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/migrations/migrations.go`
+- Updated the server wiring in:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespaced/main.go`
+- Added admin HTTP request/response types, handlers, and routes in:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/admin_types.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/admin_handlers.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/router.go`
+- Added typed admin client helpers in:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/client/admin.go`
+- Implemented these new read-only CLI commands:
+  - `admin spaces`
+  - `admin dump`
+  - `admin stats`
+  - `admin config`
+  - `admin schema`
+  - `admin waiters`
+- Added tests in:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/store/admin_store_test.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/service/admin_test.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/router_test.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`
+- Ran:
+  - `go test ./cmd/tuplespacectl ./internal/store ./internal/service ./internal/api/httpapi -count=1`
+  - `go test ./... -count=1`
+
+### Why
+
+- Read-only admin commands are the safest first operator surface and they validate most of the new architectural seams.
+- `stats`, `config`, `schema`, and `waiters` require server-owned runtime state, so implementing them early forced the service boundary to mature before more commands piled on top of it.
+
+### What worked
+
+- The new admin routes under `/v1/admin/...` worked through the real built-binary server and CLI path.
+- `admin spaces`, `admin dump`, `admin stats`, `admin config`, and `admin schema` all passed the new CLI integration test.
+- The waiter registry appeared in service tests and then cleared correctly after a matching tuple arrived.
+- The full repository test suite passed after the slice landed.
+
+### What didn't work
+
+- The first implementation of `CountTuples` reused the same SQL builder as tuple listing and therefore inherited `ORDER BY space, id`.
+- That caused the exact Postgres error:
+  - `ERROR: column "tuples.space" must appear in the GROUP BY clause or be used in an aggregate function (SQLSTATE 42803)`
+- It broke:
+  - `internal/store` tests,
+  - `service.Stats`,
+  - the `admin stats` CLI path,
+  - the router test for the admin read-only endpoints.
+- I fixed it by only appending `ORDER BY` in the listing path, not the count path.
+
+### What I learned
+
+- It was worth introducing a dedicated `internal/admin` package rather than letting service/store/http/client each define their own nearly identical structs.
+- The server constructor now genuinely owns more runtime state than before, which is necessary if the admin surface is going to report process-local information accurately.
+
+### What was tricky to build
+
+- The most subtle part was balancing immediate CLI needs against future admin commands. If I had only implemented the exact fields needed by `spaces` and `dump`, I would have had to refactor the service and client again almost immediately for `purge`, `tuple delete`, and `notify-test`.
+- The second tricky part was waiter registration timing. The registry should represent operations that are actually blocked, not every `rd`/`in` call with a positive timeout. Registering the waiter only when the first read attempt fails was the right compromise.
+
+### What warrants a second pair of eyes
+
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/service/service.go`, especially the waiter registration/removal path inside `read(...)`.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/service/admin.go`, especially config redaction and schema inspection.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/store/admin_store.go`, especially the shared filter builder and count/list split.
+- `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`, especially the built-binary admin read-only coverage.
+
+### What should be done in the future
+
+- Add the remaining CLI commands:
+  - `admin tuple get`
+  - `admin tuple delete`
+  - `admin peek`
+  - `admin export`
+  - `admin purge`
+  - `admin notify-test`
+- Add stronger tests around notifier testing and destructive admin operations.
+
+### Code review instructions
+
+- Start with:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/admin/models.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/store/admin_store.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/service/admin.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/router.go`
+- Then review:
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/client/admin.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/cmds/admin/`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/store/admin_store_test.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/service/admin_test.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/internal/api/httpapi/router_test.go`
+  - `/home/manuel/code/wesen/2026-03-22--tuplespace/cmd/tuplespacectl/main_test.go`
+- Validate with:
+  - `go test ./cmd/tuplespacectl ./internal/store ./internal/service ./internal/api/httpapi -count=1`
+  - `go test ./... -count=1`
+
+### Technical details
+
+- New end-user commands in this slice:
+  - `tuplespacectl admin spaces`
+  - `tuplespacectl admin dump --space jobs`
+  - `tuplespacectl admin stats`
+  - `tuplespacectl admin config`
+  - `tuplespacectl admin schema`
+  - `tuplespacectl admin waiters`
+- New server routes in this slice:
+  - `GET /v1/admin/spaces`
+  - `POST /v1/admin/dump`
+  - `GET /v1/admin/stats`
+  - `GET /v1/admin/config`
+  - `GET /v1/admin/schema`
+  - `GET /v1/admin/waiters`
 
 ## Usage Examples
 
