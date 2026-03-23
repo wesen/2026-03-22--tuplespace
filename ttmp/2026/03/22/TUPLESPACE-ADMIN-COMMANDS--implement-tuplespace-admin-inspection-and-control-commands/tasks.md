@@ -1,0 +1,48 @@
+# Tasks
+
+## TODO
+
+- [x] Inspect the existing TupleSpace service, HTTP API, notifier, config, and CLI layout to ground the admin-command design.
+- [x] Create the `TUPLESPACE-ADMIN-COMMANDS` ticket with a design plan and implementation diary.
+- [x] Write a detailed implementation plan covering API shape, service/store changes, instrumentation, safety rules, and rollout order.
+- [ ] Add store-level read models for tuple metadata, space summaries, raw tuple lookup, filtered listing, and export iteration.
+- [ ] Add store-level mutating admin operations for delete-by-id and purge-by-filter.
+- [ ] Add notifier introspection for subscriber counts and a safe test notification entry point.
+- [ ] Add service-level admin interfaces and implementations for:
+  - spaces
+  - dump
+  - stats
+  - config
+  - schema
+  - tuple get
+  - tuple delete
+  - export
+  - peek
+  - purge
+  - waiters
+  - notify-test
+- [ ] Add runtime waiter instrumentation so blocked `rd`/`in` operations can be listed safely.
+- [ ] Extend the HTTP API router and handlers with admin endpoints for all planned commands.
+- [ ] Extend the CLI client with request/response helpers for all admin endpoints.
+- [ ] Implement the read-only admin CLI commands:
+  - `admin spaces`
+  - `admin dump`
+  - `admin stats`
+  - `admin config`
+  - `admin schema`
+- [ ] Implement the tuple-targeted admin CLI commands:
+  - `admin tuple get`
+  - `admin tuple delete`
+- [ ] Implement the filtered inspection/export CLI commands:
+  - `admin peek`
+  - `admin export`
+- [ ] Implement the mutating/control CLI commands:
+  - `admin purge`
+  - `admin waiters`
+  - `admin notify-test`
+- [ ] Add HTTP handler tests for the new admin endpoints.
+- [ ] Add store and service tests for admin queries, tuple deletion, purge filters, notifier testing, and waiter introspection.
+- [ ] Add built-binary CLI tests covering the new admin commands against the real server path.
+- [ ] Run full verification with targeted package tests and `go test ./... -count=1`.
+- [ ] Update the ticket changelog and diary after each implementation slice with exact commit hashes and validation evidence.
+- [ ] Close the ticket after implementation work is completed and reviewed.
