@@ -1,6 +1,6 @@
 bin/
 .DS_Store
 .env
+.envrc
 .env.local
 coverage.out
-
